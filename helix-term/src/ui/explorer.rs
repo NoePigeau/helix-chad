@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 
 use helix_vcs::FileChange;
 use helix_view::{
@@ -12,7 +12,9 @@ use helix_view::{
 
 use tui::buffer::Buffer as Surface;
 
-use crate::compositor::EventResult;
+use crate::compositor::{Callback, Compositor, Context, EventResult};
+use crate::job;
+use crate::ui::{completers, EditorView, Prompt, PromptEvent};
 
 /// Default width (in columns) of the file explorer sidebar.
 const DEFAULT_WIDTH: u16 = 30;
@@ -235,8 +237,17 @@ impl ExplorerSidebar {
         entries
     }
 
-    /// Rebuild the tree from scratch, showing only the root's direct children.
+    /// Rebuild the tree from disk, preserving which directories were expanded
+    /// and which entry was selected.
     fn reload(&mut self) {
+        let expanded: HashSet<PathBuf> = self
+            .nodes
+            .iter()
+            .filter(|node| node.is_dir && node.expanded)
+            .map(|node| node.path.clone())
+            .collect();
+        let selected_path = self.nodes.get(self.selected).map(|node| node.path.clone());
+
         let root = self.root.clone();
         self.nodes = Self::read_dir(&root)
             .into_iter()
@@ -247,7 +258,22 @@ impl ExplorerSidebar {
                 expanded: false,
             })
             .collect();
-        self.selected = 0;
+
+        // Re-expand directories that were open before. Expanding inserts the
+        // children right after the directory, so the forward walk reaches them
+        // too and restores nested expansion.
+        let mut index = 0;
+        while index < self.nodes.len() {
+            let node = &self.nodes[index];
+            if node.is_dir && !node.expanded && expanded.contains(&node.path) {
+                self.expand(index);
+            }
+            index += 1;
+        }
+
+        self.selected = selected_path
+            .and_then(|path| self.nodes.iter().position(|node| node.path == path))
+            .unwrap_or(0);
         self.scroll = 0;
     }
 
@@ -284,6 +310,16 @@ impl ExplorerSidebar {
         }
         self.nodes.drain(index + 1..end);
         self.nodes[index].expanded = false;
+    }
+
+    /// Collapse every directory, leaving only the root's direct children.
+    fn collapse_all(&mut self) {
+        self.nodes.retain(|node| node.depth == 0);
+        for node in &mut self.nodes {
+            node.expanded = false;
+        }
+        self.selected = self.selected.min(self.nodes.len().saturating_sub(1));
+        self.scroll = 0;
     }
 
     fn move_selection(&mut self, delta: isize) {
@@ -346,11 +382,180 @@ impl ExplorerSidebar {
                 self.reload();
                 self.refresh_git_status(editor);
             }
+            KeyCode::Char('a') => {
+                // Create a file/directory at the cursor location: inside the
+                // selected directory, or alongside the selected file.
+                let target_dir = match self.nodes.get(self.selected) {
+                    Some(node) if node.is_dir => node.path.clone(),
+                    Some(node) => node
+                        .path
+                        .parent()
+                        .map(Path::to_path_buf)
+                        .unwrap_or_else(|| self.root.clone()),
+                    None => self.root.clone(),
+                };
+                return EventResult::Consumed(Some(Self::create_prompt(target_dir)));
+            }
+            KeyCode::Char('r') => {
+                if let Some(node) = self.nodes.get(self.selected) {
+                    let source = node.path.clone();
+                    return EventResult::Consumed(Some(Self::rename_prompt(source)));
+                }
+            }
+            KeyCode::Char('d') => {
+                if let Some(node) = self.nodes.get(self.selected) {
+                    let source = node.path.clone();
+                    return EventResult::Consumed(Some(Self::delete_prompt(source)));
+                }
+            }
+            KeyCode::Char('W') => self.collapse_all(),
             KeyCode::Char('q') | KeyCode::Esc => self.unfocus(),
             _ => {}
         }
 
         EventResult::Consumed(None)
+    }
+
+    /// Reload the tree, refresh VCS status, and reveal `path` (used after a
+    /// file system operation triggered from the explorer).
+    pub(crate) fn reload_and_reveal(&mut self, path: &Path, editor: &Editor) {
+        self.reload();
+        self.refresh_git_status(editor);
+        self.reveal(path);
+    }
+
+    /// Schedule a tree refresh that reveals `path` once the editor and
+    /// compositor are both available again.
+    fn schedule_reveal(path: PathBuf) {
+        job::dispatch_blocking(move |editor, compositor| {
+            if let Some(editor_view) = compositor.find::<EditorView>() {
+                editor_view.explorer.reload_and_reveal(&path, editor);
+            }
+        });
+    }
+
+    /// Build the command-line prompt used to create a file or directory. A
+    /// trailing path separator creates a directory; intermediate directories
+    /// are created as needed.
+    fn create_prompt(target_dir: PathBuf) -> Callback {
+        Box::new(move |compositor: &mut Compositor, cx: &mut Context| {
+            let mut prefill = target_dir.to_string_lossy().into_owned();
+            if !prefill.ends_with(MAIN_SEPARATOR) {
+                prefill.push(MAIN_SEPARATOR);
+            }
+
+            let prompt = Prompt::new(
+                "create:".into(),
+                None,
+                completers::filename,
+                |cx: &mut Context, input: &str, event: PromptEvent| {
+                    if event != PromptEvent::Validate {
+                        return;
+                    }
+                    let input = input.trim();
+                    if input.is_empty() {
+                        return;
+                    }
+
+                    let is_dir = input.ends_with(MAIN_SEPARATOR);
+                    let path = PathBuf::from(input);
+                    match cx.editor.create_path(&path, is_dir) {
+                        Ok(()) => Self::schedule_reveal(helix_stdx::path::canonicalize(&path)),
+                        Err(err) => cx
+                            .editor
+                            .set_error(format!("Could not create {}: {}", path.display(), err)),
+                    }
+                },
+            )
+            .with_line(prefill, cx.editor);
+
+            compositor.push(Box::new(prompt));
+        })
+    }
+
+    /// Build the command-line prompt used to delete `source`. Validating
+    /// removes the path on the line (directories are removed recursively).
+    fn delete_prompt(source: PathBuf) -> Callback {
+        Box::new(move |compositor: &mut Compositor, cx: &mut Context| {
+            let prefill = source.to_string_lossy().into_owned();
+
+            let prompt = Prompt::new(
+                "delete:".into(),
+                None,
+                completers::filename,
+                |cx: &mut Context, input: &str, event: PromptEvent| {
+                    if event != PromptEvent::Validate {
+                        return;
+                    }
+                    let input = input.trim();
+                    if input.is_empty() {
+                        return;
+                    }
+
+                    let path = PathBuf::from(input);
+                    match cx.editor.delete_path(&path, true) {
+                        Ok(()) => {
+                            let reveal = path
+                                .parent()
+                                .filter(|parent| !parent.as_os_str().is_empty())
+                                .unwrap_or(&path);
+                            Self::schedule_reveal(helix_stdx::path::canonicalize(reveal));
+                        }
+                        Err(err) => cx
+                            .editor
+                            .set_error(format!("Could not delete {}: {}", path.display(), err)),
+                    }
+                },
+            )
+            .with_line(prefill, cx.editor);
+
+            compositor.push(Box::new(prompt));
+        })
+    }
+
+    /// Build the command-line prompt used to rename/move `source`. Intermediate
+    /// directories in the destination are created as needed.
+    fn rename_prompt(source: PathBuf) -> Callback {
+        Box::new(move |compositor: &mut Compositor, cx: &mut Context| {
+            let prefill = source.to_string_lossy().into_owned();
+
+            let prompt = Prompt::new(
+                "rename:".into(),
+                None,
+                completers::filename,
+                move |cx: &mut Context, input: &str, event: PromptEvent| {
+                    if event != PromptEvent::Validate {
+                        return;
+                    }
+                    let input = input.trim();
+                    if input.is_empty() {
+                        return;
+                    }
+
+                    let new_path = PathBuf::from(input);
+                    if let Some(parent) = new_path.parent() {
+                        if !parent.as_os_str().is_empty() && !parent.exists() {
+                            if let Err(err) = std::fs::create_dir_all(parent) {
+                                cx.editor.set_error(format!(
+                                    "Could not create {}: {}",
+                                    parent.display(),
+                                    err
+                                ));
+                                return;
+                            }
+                        }
+                    }
+
+                    match cx.editor.move_path(&source, &new_path) {
+                        Ok(()) => Self::schedule_reveal(helix_stdx::path::canonicalize(&new_path)),
+                        Err(err) => cx.editor.set_error(format!("Could not rename: {}", err)),
+                    }
+                },
+            )
+            .with_line(prefill, cx.editor);
+
+            compositor.push(Box::new(prompt));
+        })
     }
 
     pub fn render(&mut self, area: Rect, surface: &mut Surface, editor: &Editor) {
