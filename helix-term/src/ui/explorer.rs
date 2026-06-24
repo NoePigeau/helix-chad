@@ -1,0 +1,459 @@
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use helix_vcs::FileChange;
+use helix_view::{
+    editor::Action,
+    graphics::{Color, Rect, Style},
+    input::KeyEvent,
+    keyboard::{KeyCode, KeyModifiers},
+    Editor,
+};
+
+use tui::buffer::Buffer as Surface;
+
+use crate::compositor::EventResult;
+
+/// Default width (in columns) of the file explorer sidebar.
+const DEFAULT_WIDTH: u16 = 30;
+
+/// VCS status of a file, used to color its entry in the tree.
+#[derive(Debug, Clone, Copy)]
+enum GitStatus {
+    /// Untracked / newly added.
+    Added,
+    /// Tracked and changed (modified, conflicted or renamed).
+    Modified,
+    /// Deleted from the working tree.
+    Deleted,
+}
+
+impl GitStatus {
+    /// Higher rank wins when a directory aggregates several statuses.
+    fn rank(self) -> u8 {
+        match self {
+            Self::Added => 1,
+            Self::Deleted => 2,
+            Self::Modified => 3,
+        }
+    }
+}
+
+/// A single visible line in the flattened file tree.
+#[derive(Debug)]
+struct TreeNode {
+    path: PathBuf,
+    depth: usize,
+    is_dir: bool,
+    /// Only meaningful for directories.
+    expanded: bool,
+}
+
+/// A simple file explorer rendered as a sidebar on the left of the editor.
+///
+/// The tree is kept as a flattened list of the currently *visible* nodes
+/// (`nodes`). Expanding a directory inserts its children right after it;
+/// collapsing removes its descendants. This keeps rendering and keyboard
+/// navigation trivial: one screen line maps to one entry in `nodes`.
+#[derive(Debug)]
+pub struct ExplorerSidebar {
+    open: bool,
+    focused: bool,
+    width: u16,
+    root: PathBuf,
+    nodes: Vec<TreeNode>,
+    selected: usize,
+    scroll: usize,
+    /// VCS status per (canonicalized) path, refreshed when the tree is opened.
+    git_status: HashMap<PathBuf, GitStatus>,
+}
+
+impl Default for ExplorerSidebar {
+    fn default() -> Self {
+        Self {
+            open: false,
+            focused: false,
+            width: DEFAULT_WIDTH,
+            root: PathBuf::new(),
+            nodes: Vec::new(),
+            selected: 0,
+            scroll: 0,
+            git_status: HashMap::new(),
+        }
+    }
+}
+
+impl ExplorerSidebar {
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
+    pub fn is_focused(&self) -> bool {
+        self.open && self.focused
+    }
+
+    pub fn width(&self) -> u16 {
+        self.width
+    }
+
+    /// Open the explorer and give it focus, revealing `current_file` if any.
+    ///
+    /// The tree state is preserved across closes: it is only rebuilt on the
+    /// first open or when the workspace root changes.
+    fn open_and_focus(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
+        let root = helix_stdx::path::canonicalize(helix_loader::find_workspace().0);
+        if self.nodes.is_empty() || self.root != root {
+            self.root = root;
+            self.reload();
+        }
+        self.refresh_git_status(editor);
+
+        self.open = true;
+        self.focused = true;
+
+        if let Some(file) = current_file {
+            self.reveal(&file);
+        }
+    }
+
+    /// Toggle the explorer open/closed. Opening also gives it focus.
+    pub fn toggle(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
+        if self.open {
+            self.open = false;
+            self.focused = false;
+        } else {
+            self.open_and_focus(current_file, editor);
+        }
+    }
+
+    /// Open (if needed) and focus the explorer, revealing `current_file`.
+    pub fn focus(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
+        self.open_and_focus(current_file, editor);
+    }
+
+    /// Refresh the per-file VCS status map from the editor's diff providers.
+    fn refresh_git_status(&mut self, editor: &Editor) {
+        use helix_loader::workspace_trust::TrustQuery;
+
+        self.git_status.clear();
+
+        let trust_full = editor
+            .workspace_trust
+            .query(&helix_loader::find_workspace_in(&self.root).0, TrustQuery::Git)
+            .is_trusted();
+
+        let Ok(changes) = editor.diff_providers.changed_files(&self.root, trust_full) else {
+            return;
+        };
+
+        for change in changes {
+            let status = match change {
+                FileChange::Untracked { .. } => GitStatus::Added,
+                FileChange::Modified { .. }
+                | FileChange::Conflict { .. }
+                | FileChange::Renamed { .. } => GitStatus::Modified,
+                FileChange::Deleted { .. } => GitStatus::Deleted,
+            };
+
+            let path = helix_stdx::path::canonicalize(change.path());
+            Self::mark_status(&mut self.git_status, path.clone(), status);
+
+            // Propagate the status up to every parent directory within the tree,
+            // so a folder containing changes is colored too (à la VSCode).
+            let mut current = path.as_path();
+            while let Some(parent) = current.parent() {
+                if parent == self.root || !parent.starts_with(&self.root) {
+                    break;
+                }
+                Self::mark_status(&mut self.git_status, parent.to_path_buf(), status);
+                current = parent;
+            }
+        }
+    }
+
+    /// Record `status` for `path`. When a directory aggregates several kinds of
+    /// changes, the highest-ranked status wins.
+    fn mark_status(map: &mut HashMap<PathBuf, GitStatus>, path: PathBuf, status: GitStatus) {
+        let entry = map.entry(path).or_insert(status);
+        if status.rank() > entry.rank() {
+            *entry = status;
+        }
+    }
+
+    /// Expand the parent directories of `target` and select it in the tree.
+    fn reveal(&mut self, target: &Path) {
+        let target = helix_stdx::path::canonicalize(target);
+        let Ok(rel) = target.strip_prefix(&self.root) else {
+            return;
+        };
+
+        let mut current = self.root.clone();
+        for component in rel.components() {
+            current = current.join(component);
+            let Some(index) = self.nodes.iter().position(|node| node.path == current) else {
+                return;
+            };
+            if current == target {
+                self.selected = index;
+                return;
+            }
+            if self.nodes[index].is_dir && !self.nodes[index].expanded {
+                self.expand(index);
+            }
+        }
+    }
+
+    /// Give focus back to the editor without closing the explorer.
+    fn unfocus(&mut self) {
+        self.focused = false;
+    }
+
+    /// Read entries of `dir`, sorted with directories first then files,
+    /// each compared case-insensitively by file name.
+    fn read_dir(dir: &Path) -> Vec<(PathBuf, bool)> {
+        let mut entries: Vec<(PathBuf, bool)> = match std::fs::read_dir(dir) {
+            Ok(read) => read
+                .flatten()
+                .map(|entry| {
+                    let path = entry.path();
+                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                    (path, is_dir)
+                })
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+
+        entries.sort_by(|(a, a_dir), (b, b_dir)| {
+            b_dir.cmp(a_dir).then_with(|| {
+                a.file_name()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .cmp(&b.file_name().unwrap_or_default().to_ascii_lowercase())
+            })
+        });
+
+        entries
+    }
+
+    /// Rebuild the tree from scratch, showing only the root's direct children.
+    fn reload(&mut self) {
+        let root = self.root.clone();
+        self.nodes = Self::read_dir(&root)
+            .into_iter()
+            .map(|(path, is_dir)| TreeNode {
+                path,
+                depth: 0,
+                is_dir,
+                expanded: false,
+            })
+            .collect();
+        self.selected = 0;
+        self.scroll = 0;
+    }
+
+    /// Expand the directory at `index`, inserting its children right after it.
+    fn expand(&mut self, index: usize) {
+        let (path, depth) = {
+            let node = &self.nodes[index];
+            if !node.is_dir || node.expanded {
+                return;
+            }
+            (node.path.clone(), node.depth)
+        };
+
+        let children: Vec<TreeNode> = Self::read_dir(&path)
+            .into_iter()
+            .map(|(path, is_dir)| TreeNode {
+                path,
+                depth: depth + 1,
+                is_dir,
+                expanded: false,
+            })
+            .collect();
+
+        self.nodes[index].expanded = true;
+        self.nodes.splice(index + 1..index + 1, children);
+    }
+
+    /// Collapse the directory at `index`, removing all of its descendants.
+    fn collapse(&mut self, index: usize) {
+        let depth = self.nodes[index].depth;
+        let mut end = index + 1;
+        while end < self.nodes.len() && self.nodes[end].depth > depth {
+            end += 1;
+        }
+        self.nodes.drain(index + 1..end);
+        self.nodes[index].expanded = false;
+    }
+
+    fn move_selection(&mut self, delta: isize) {
+        if self.nodes.is_empty() {
+            return;
+        }
+        let last = self.nodes.len() - 1;
+        self.selected = (self.selected as isize + delta).clamp(0, last as isize) as usize;
+    }
+
+    /// Activate the selected entry: toggle a directory or open a file.
+    fn activate(&mut self, editor: &mut Editor) {
+        let Some(node) = self.nodes.get(self.selected) else {
+            return;
+        };
+
+        if node.is_dir {
+            if node.expanded {
+                self.collapse(self.selected);
+            } else {
+                self.expand(self.selected);
+            }
+        } else {
+            let path = node.path.clone();
+            if let Err(err) = editor.open(&path, Action::Replace) {
+                editor.set_error(format!("Failed to open {}: {}", path.display(), err));
+            } else {
+                self.unfocus();
+            }
+        }
+    }
+
+    pub fn handle_key(&mut self, event: KeyEvent, editor: &mut Editor) -> EventResult {
+        if event.modifiers.contains(KeyModifiers::CONTROL) {
+            return EventResult::Ignored(None);
+        }
+
+        match event.code {
+            KeyCode::Char('j') | KeyCode::Down => self.move_selection(1),
+            KeyCode::Char('k') | KeyCode::Up => self.move_selection(-1),
+            KeyCode::Char('l') | KeyCode::Enter | KeyCode::Right => self.activate(editor),
+            KeyCode::Char('h') | KeyCode::Left => {
+                // Collapse the selected directory if expanded, otherwise jump
+                // to and collapse the parent.
+                if let Some(node) = self.nodes.get(self.selected) {
+                    if node.is_dir && node.expanded {
+                        self.collapse(self.selected);
+                    } else if node.depth > 0 {
+                        if let Some(parent) = self.nodes[..self.selected]
+                            .iter()
+                            .rposition(|n| n.depth < node.depth)
+                        {
+                            self.selected = parent;
+                            self.collapse(parent);
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('R') => {
+                self.reload();
+                self.refresh_git_status(editor);
+            }
+            KeyCode::Char('q') | KeyCode::Esc => self.unfocus(),
+            _ => {}
+        }
+
+        EventResult::Consumed(None)
+    }
+
+    pub fn render(&mut self, area: Rect, surface: &mut Surface, editor: &Editor) {
+        let theme = &editor.theme;
+        let background = theme.get("ui.background");
+        let text_style = theme.get("ui.text");
+        let dir_style = theme.get("ui.text.focus");
+        let selected_style = if self.focused {
+            theme.get("ui.menu.selected")
+        } else {
+            theme.get("ui.cursorline.primary")
+        };
+
+        // VCS colors, overridable through the theme, otherwise hardcoded.
+        let added_style = theme
+            .try_get("version_control.added")
+            .unwrap_or_else(|| Style::default().fg(Color::Rgb(0x27, 0xA6, 0x57)));
+        let modified_style = theme
+            .try_get("version_control.modified")
+            .unwrap_or_else(|| Style::default().fg(Color::Rgb(0xD3, 0xB0, 0x20)));
+        let deleted_style = theme
+            .try_get("version_control.deleted")
+            .unwrap_or_else(|| Style::default().fg(Color::Rgb(0xE0, 0x6C, 0x76)));
+
+        surface.set_style(area, background);
+
+        // Reserve the last column for a vertical separator between the explorer
+        // and the editor, so text is rendered within `inner`.
+        let inner = area.clip_right(1);
+        let height = inner.height as usize;
+
+        // Draw the separator line (styled via the `ui.window` theme key, like
+        // window split borders).
+        let separator_style = theme.get("ui.window");
+        let separator_x = area.right().saturating_sub(1);
+        for y in area.top()..area.bottom() {
+            surface[(separator_x, y)]
+                .set_symbol(tui::symbols::line::VERTICAL)
+                .set_style(separator_style);
+        }
+
+        // Keep the selection within the visible window.
+        if self.selected < self.scroll {
+            self.scroll = self.selected;
+        } else if height > 0 && self.selected >= self.scroll + height {
+            self.scroll = self.selected - height + 1;
+        }
+
+        for (row, node) in self
+            .nodes
+            .iter()
+            .enumerate()
+            .skip(self.scroll)
+            .take(height)
+        {
+            let y = inner.y + (row - self.scroll) as u16;
+
+            let indent = "  ".repeat(node.depth);
+            let marker = if node.is_dir {
+                if node.expanded {
+                    "▾ "
+                } else {
+                    "▸ "
+                }
+            } else {
+                "  "
+            };
+            let name = node
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let line = format!("{}{}{}", indent, marker, name);
+
+            // Color any entry (file or directory) that carries a VCS status, so
+            // the whole path leading to a change is highlighted.
+            let git = self.git_status.get(&node.path).copied();
+            let content_style = match git {
+                Some(GitStatus::Added) => added_style,
+                Some(GitStatus::Modified) => modified_style,
+                Some(GitStatus::Deleted) => deleted_style,
+                None if node.is_dir => dir_style,
+                None => text_style,
+            };
+            let style = if row == self.selected {
+                // On the selected line, keep the selection's background and
+                // modifiers, but preserve the git foreground color so it stays
+                // green/yellow instead of being overridden.
+                if git.is_some() {
+                    let mut style = selected_style;
+                    style.fg = content_style.fg;
+                    style
+                } else {
+                    selected_style
+                }
+            } else {
+                content_style
+            };
+
+            if row == self.selected {
+                surface.set_style(Rect::new(area.x, y, area.width, 1), selected_style);
+            }
+            surface.set_stringn(inner.x, y, &line, inner.width as usize, style);
+        }
+    }
+}

@@ -190,6 +190,8 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
         "C-u" => page_cursor_half_up,
         "C-d" => page_cursor_half_down,
 
+        "C-e" => toggle_file_explorer,
+
         "C-w" => { "Window"
             "C-w" | "w" => rotate_view,
             "C-s" | "s" => hsplit,
@@ -225,7 +227,7 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
         "space" => { "Space"
             "f" => file_picker,
             "F" => file_picker_in_current_directory,
-            "e" => file_explorer,
+            "e" => focus_file_explorer,
             "." => file_explorer_in_current_buffer_directory,
             "b" => buffer_picker,
             "j" => jumplist_picker,

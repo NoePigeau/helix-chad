@@ -9,7 +9,7 @@ use crate::{
         document::{render_document, LinePos, TextRenderer},
         statusline,
         text_decorations::{self, Decoration, DecorationManager, InlineDiagnostics},
-        Completion, ProgressSpinners,
+        Completion, ExplorerSidebar, ProgressSpinners,
     },
 };
 
@@ -44,6 +44,7 @@ pub struct EditorView {
     spinners: ProgressSpinners,
     /// Tracks if the terminal window is focused by reaction to terminal focus events
     terminal_focused: bool,
+    pub(crate) explorer: ExplorerSidebar,
 }
 
 #[derive(Debug, Clone)]
@@ -67,11 +68,24 @@ impl EditorView {
             completion: None,
             spinners: ProgressSpinners::default(),
             terminal_focused: true,
+            explorer: ExplorerSidebar::default(),
         }
     }
 
     pub fn spinners_mut(&mut self) -> &mut ProgressSpinners {
         &mut self.spinners
+    }
+
+    /// Toggle the file explorer sidebar open/closed. When opening, `current_file`
+    /// (if any) is revealed and selected in the tree.
+    pub fn toggle_explorer(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
+        self.explorer.toggle(current_file, editor);
+    }
+
+    /// Open (if needed) and focus the file explorer sidebar, revealing
+    /// `current_file` (if any).
+    pub fn focus_explorer(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
+        self.explorer.focus(current_file, editor);
     }
 
     pub fn render_view(
@@ -1452,6 +1466,16 @@ impl Component for EditorView {
         event: &Event,
         context: &mut crate::compositor::Context,
     ) -> EventResult {
+        // When the file explorer has focus, key events are routed to it instead
+        // of the editor.
+        if self.explorer.is_focused() {
+            if let Event::Key(key) = event {
+                let mut key = *key;
+                canonicalize_key(&mut key);
+                return self.explorer.handle_key(key, context.editor);
+            }
+        }
+
         let mut cx = commands::Context {
             editor: context.editor,
             count: None,
@@ -1634,6 +1658,17 @@ impl Component for EditorView {
             editor_area = editor_area.clip_top(1);
         }
 
+        // Carve out a strip on the left for the file explorer, if open. The
+        // editor then lays out its splits within the remaining area.
+        let explorer_area = if self.explorer.is_open() {
+            let width = self.explorer.width().min(editor_area.width);
+            let left = editor_area.with_width(width);
+            editor_area = editor_area.clip_left(width);
+            Some(left)
+        } else {
+            None
+        };
+
         // if the terminal size suddenly changed, we need to trigger a resize
         cx.editor.resize(editor_area);
 
@@ -1644,6 +1679,10 @@ impl Component for EditorView {
         for (view, is_focused) in cx.editor.tree.views() {
             let doc = cx.editor.document(view.doc).unwrap();
             self.render_view(cx.editor, doc, view, area, surface, is_focused);
+        }
+
+        if let Some(explorer_area) = explorer_area {
+            self.explorer.render(explorer_area, surface, cx.editor);
         }
 
         if config.auto_info {
@@ -1735,6 +1774,10 @@ impl Component for EditorView {
     }
 
     fn cursor(&self, _area: Rect, editor: &Editor) -> (Option<Position>, CursorKind) {
+        // Hide the editor cursor while the file explorer holds focus.
+        if self.explorer.is_focused() {
+            return (None, CursorKind::Hidden);
+        }
         match editor.cursor() {
             // all block cursors are drawn manually
             (pos, CursorKind::Block) => {

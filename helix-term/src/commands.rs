@@ -406,6 +406,8 @@ impl MappableCommand {
         file_explorer, "Open file explorer in workspace root",
         file_explorer_in_current_buffer_directory, "Open file explorer at current buffer's directory",
         file_explorer_in_current_directory, "Open file explorer at current working directory",
+        toggle_file_explorer, "Toggle file explorer sidebar",
+        focus_file_explorer, "Focus file explorer sidebar",
         code_action, "Perform code action",
         buffer_picker, "Open buffer picker",
         jumplist_picker, "Open jumplist picker",
@@ -3175,6 +3177,24 @@ fn file_picker(cx: &mut Context) {
     }
     let picker = ui::file_picker(cx.editor, root);
     cx.push_layer(Box::new(overlaid(picker)));
+}
+
+fn toggle_file_explorer(cx: &mut Context) {
+    let current_file = doc!(cx.editor).path().map(|path| path.to_path_buf());
+    cx.callback.push(Box::new(move |compositor, cx| {
+        if let Some(editor_view) = compositor.find::<ui::EditorView>() {
+            editor_view.toggle_explorer(current_file, cx.editor);
+        }
+    }));
+}
+
+fn focus_file_explorer(cx: &mut Context) {
+    let current_file = doc!(cx.editor).path().map(|path| path.to_path_buf());
+    cx.callback.push(Box::new(move |compositor, cx| {
+        if let Some(editor_view) = compositor.find::<ui::EditorView>() {
+            editor_view.focus_explorer(current_file, cx.editor);
+        }
+    }));
 }
 
 fn file_picker_in_current_buffer_directory(cx: &mut Context) {

@@ -61,6 +61,30 @@ impl DiffProviderRegistry {
         })
     }
 
+    /// Synchronously collect every changed file under `cwd`. Unlike
+    /// [`Self::for_each_changed_file`] this blocks the caller, so it is meant
+    /// for one-off queries (e.g. refreshing a file explorer) rather than the
+    /// hot path.
+    pub fn changed_files(&self, cwd: &Path, trust_full: bool) -> Result<Vec<FileChange>> {
+        let changes = std::cell::RefCell::new(Vec::new());
+        let succeeded = self.providers.iter().any(|provider| {
+            provider
+                .for_each_changed_file(cwd, trust_full, |change| {
+                    if let Ok(change) = change {
+                        changes.borrow_mut().push(change);
+                    }
+                    true
+                })
+                .is_ok()
+        });
+
+        if succeeded {
+            Ok(changes.into_inner())
+        } else {
+            bail!("no diff provider returns success")
+        }
+    }
+
     /// Fire-and-forget changed file iteration. Runs everything in a background task. Keeps
     /// iteration until `on_change` returns `false`.
     pub fn for_each_changed_file(
