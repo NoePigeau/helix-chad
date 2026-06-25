@@ -9,7 +9,7 @@ use crate::{
         document::{render_document, LinePos, TextRenderer},
         statusline,
         text_decorations::{self, Decoration, DecorationManager, InlineDiagnostics},
-        Completion, ExplorerSidebar, ProgressSpinners,
+        ChangesSidebar, Completion, ExplorerSidebar, ProgressSpinners,
     },
 };
 
@@ -45,6 +45,7 @@ pub struct EditorView {
     /// Tracks if the terminal window is focused by reaction to terminal focus events
     terminal_focused: bool,
     pub(crate) explorer: ExplorerSidebar,
+    pub(crate) changes: ChangesSidebar,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +70,7 @@ impl EditorView {
             spinners: ProgressSpinners::default(),
             terminal_focused: true,
             explorer: ExplorerSidebar::default(),
+            changes: ChangesSidebar::default(),
         }
     }
 
@@ -80,12 +82,30 @@ impl EditorView {
     /// (if any) is revealed and selected in the tree.
     pub fn toggle_explorer(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
         self.explorer.toggle(current_file, editor);
+        if self.explorer.is_open() {
+            self.changes.close();
+        }
     }
 
     /// Open (if needed) and focus the file explorer sidebar, revealing
     /// `current_file` (if any).
     pub fn focus_explorer(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
         self.explorer.focus(current_file, editor);
+        self.changes.close();
+    }
+
+    /// Open and focus the git changes sidebar. If it is already open but
+    /// unfocused (the editor has focus), this just gives it focus; if it is
+    /// already focused, it closes. The two left sidebars are mutually exclusive.
+    pub fn toggle_changes(&mut self, editor: &Editor) {
+        if self.changes.is_open() && !self.changes.is_focused() {
+            self.changes.focus_panel();
+        } else {
+            self.changes.toggle(editor);
+        }
+        if self.changes.is_open() {
+            self.explorer.close();
+        }
     }
 
     pub fn render_view(
@@ -1466,16 +1486,30 @@ impl Component for EditorView {
         event: &Event,
         context: &mut crate::compositor::Context,
     ) -> EventResult {
-        // When the file explorer has focus, key events are routed to it instead
-        // of the editor.
-        if self.explorer.is_focused() {
+        // When a left sidebar holds focus, key events are routed to it instead
+        // of the editor — except a few keys that fall through to the normal
+        // keymap so the leader menu (e.g. `space e`/`space g` to switch
+        // sidebars) and the command line still work from within a sidebar.
+        if self.explorer.is_focused() || self.changes.is_focused() {
             if let Event::Key(key) = event {
                 let mut key = *key;
                 canonicalize_key(&mut key);
-                return self.explorer.handle_key(key, context.editor);
+
+                let mid_chord = !self.keymaps.pending().is_empty();
+                let leader = matches!(
+                    key.code,
+                    KeyCode::Char(' ') | KeyCode::Char(':') | KeyCode::Char(';')
+                );
+                if !mid_chord && !leader {
+                    if self.explorer.is_focused() {
+                        return self.explorer.handle_key(key, context.editor);
+                    } else {
+                        return self.changes.handle_key(key, context.editor);
+                    }
+                }
+                // otherwise: fall through to normal keymap handling below.
             }
         }
-
         let mut cx = commands::Context {
             editor: context.editor,
             count: None,
@@ -1669,6 +1703,15 @@ impl Component for EditorView {
             None
         };
 
+        let changes_area = if self.changes.is_open() {
+            let width = self.changes.width().min(editor_area.width);
+            let left = editor_area.with_width(width);
+            editor_area = editor_area.clip_left(width);
+            Some(left)
+        } else {
+            None
+        };
+
         // if the terminal size suddenly changed, we need to trigger a resize
         cx.editor.resize(editor_area);
 
@@ -1683,6 +1726,10 @@ impl Component for EditorView {
 
         if let Some(explorer_area) = explorer_area {
             self.explorer.render(explorer_area, surface, cx.editor);
+        }
+
+        if let Some(changes_area) = changes_area {
+            self.changes.render(changes_area, surface, cx.editor);
         }
 
         if config.auto_info {
@@ -1774,8 +1821,8 @@ impl Component for EditorView {
     }
 
     fn cursor(&self, _area: Rect, editor: &Editor) -> (Option<Position>, CursorKind) {
-        // Hide the editor cursor while the file explorer holds focus.
-        if self.explorer.is_focused() {
+        // Hide the editor cursor while a left sidebar holds focus.
+        if self.explorer.is_focused() || self.changes.is_focused() {
             return (None, CursorKind::Hidden);
         }
         match editor.cursor() {

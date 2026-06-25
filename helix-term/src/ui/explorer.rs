@@ -210,6 +210,12 @@ impl ExplorerSidebar {
         self.focused = false;
     }
 
+    /// Close the explorer entirely (used when another left sidebar opens).
+    pub fn close(&mut self) {
+        self.open = false;
+        self.focused = false;
+    }
+
     /// Read entries of `dir`, sorted with directories first then files,
     /// each compared case-insensitively by file name.
     fn read_dir(dir: &Path) -> Vec<(PathBuf, bool)> {

@@ -408,6 +408,7 @@ impl MappableCommand {
         file_explorer_in_current_directory, "Open file explorer at current working directory",
         toggle_file_explorer, "Toggle file explorer sidebar",
         focus_file_explorer, "Focus file explorer sidebar",
+        toggle_changes_sidebar, "Toggle git changes sidebar",
         code_action, "Perform code action",
         buffer_picker, "Open buffer picker",
         jumplist_picker, "Open jumplist picker",
@@ -3193,6 +3194,14 @@ fn focus_file_explorer(cx: &mut Context) {
     cx.callback.push(Box::new(move |compositor, cx| {
         if let Some(editor_view) = compositor.find::<ui::EditorView>() {
             editor_view.focus_explorer(current_file, cx.editor);
+        }
+    }));
+}
+
+fn toggle_changes_sidebar(cx: &mut Context) {
+    cx.callback.push(Box::new(|compositor, cx| {
+        if let Some(editor_view) = compositor.find::<ui::EditorView>() {
+            editor_view.toggle_changes(cx.editor);
         }
     }));
 }
