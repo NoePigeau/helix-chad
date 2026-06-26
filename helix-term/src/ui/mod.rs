@@ -24,6 +24,7 @@ pub use changes::ChangesSidebar;
 pub use completion::Completion;
 pub use editor::EditorView;
 pub use explorer::ExplorerSidebar;
+pub(crate) use explorer::GitStatus;
 use helix_stdx::rope;
 use helix_view::theme::Style;
 pub use markdown::Markdown;

@@ -7,6 +7,7 @@ use helix_view::{
     graphics::{Color, Rect, Style},
     input::KeyEvent,
     keyboard::{KeyCode, KeyModifiers},
+    theme::Theme,
     Editor,
 };
 
@@ -19,9 +20,10 @@ use crate::ui::{completers, EditorView, Prompt, PromptEvent};
 /// Default width (in columns) of the file explorer sidebar.
 const DEFAULT_WIDTH: u16 = 30;
 
-/// VCS status of a file, used to color its entry in the tree.
+/// VCS status of a file, used to color its entry in the tree (and buffer names
+/// in the bufferline).
 #[derive(Debug, Clone, Copy)]
-enum GitStatus {
+pub(crate) enum GitStatus {
     /// Untracked / newly added.
     Added,
     /// Tracked and changed (modified, conflicted or renamed).
@@ -38,6 +40,30 @@ impl GitStatus {
             Self::Deleted => 2,
             Self::Modified => 3,
         }
+    }
+
+    /// Map a VCS change to the status used to color its entry.
+    pub(crate) fn from_change(change: &FileChange) -> Self {
+        match change {
+            FileChange::Untracked { .. } => Self::Added,
+            FileChange::Modified { .. }
+            | FileChange::Conflict { .. }
+            | FileChange::Renamed { .. } => Self::Modified,
+            FileChange::Deleted { .. } => Self::Deleted,
+        }
+    }
+
+    /// VCS color, overridable through the theme, otherwise hardcoded. Shared
+    /// with the bufferline so buffer names use the same colors as the sidebar.
+    pub(crate) fn style(self, theme: &Theme) -> Style {
+        let (key, fallback) = match self {
+            Self::Added => ("version_control.added", Color::Rgb(0x27, 0xA6, 0x57)),
+            Self::Modified => ("version_control.modified", Color::Rgb(0xD3, 0xB0, 0x20)),
+            Self::Deleted => ("version_control.deleted", Color::Rgb(0xE0, 0x6C, 0x76)),
+        };
+        theme
+            .try_get(key)
+            .unwrap_or_else(|| Style::default().fg(fallback))
     }
 }
 
@@ -149,13 +175,7 @@ impl ExplorerSidebar {
         };
 
         for change in changes {
-            let status = match change {
-                FileChange::Untracked { .. } => GitStatus::Added,
-                FileChange::Modified { .. }
-                | FileChange::Conflict { .. }
-                | FileChange::Renamed { .. } => GitStatus::Modified,
-                FileChange::Deleted { .. } => GitStatus::Deleted,
-            };
+            let status = GitStatus::from_change(&change);
 
             let path = helix_stdx::path::canonicalize(change.path());
             Self::mark_status(&mut self.git_status, path.clone(), status);
@@ -575,17 +595,6 @@ impl ExplorerSidebar {
             theme.get("ui.cursorline.primary")
         };
 
-        // VCS colors, overridable through the theme, otherwise hardcoded.
-        let added_style = theme
-            .try_get("version_control.added")
-            .unwrap_or_else(|| Style::default().fg(Color::Rgb(0x27, 0xA6, 0x57)));
-        let modified_style = theme
-            .try_get("version_control.modified")
-            .unwrap_or_else(|| Style::default().fg(Color::Rgb(0xD3, 0xB0, 0x20)));
-        let deleted_style = theme
-            .try_get("version_control.deleted")
-            .unwrap_or_else(|| Style::default().fg(Color::Rgb(0xE0, 0x6C, 0x76)));
-
         surface.set_style(area, background);
 
         // Reserve the last column for a vertical separator between the explorer
@@ -640,9 +649,7 @@ impl ExplorerSidebar {
             // the whole path leading to a change is highlighted.
             let git = self.git_status.get(&node.path).copied();
             let content_style = match git {
-                Some(GitStatus::Added) => added_style,
-                Some(GitStatus::Modified) => modified_style,
-                Some(GitStatus::Deleted) => deleted_style,
+                Some(status) => status.style(theme),
                 None if node.is_dir => dir_style,
                 None => text_style,
             };

@@ -9,7 +9,7 @@ use crate::{
         document::{render_document, LinePos, TextRenderer},
         statusline,
         text_decorations::{self, Decoration, DecorationManager, InlineDiagnostics},
-        ChangesSidebar, Completion, ExplorerSidebar, ProgressSpinners,
+        ChangesSidebar, Completion, ExplorerSidebar, GitStatus, ProgressSpinners,
     },
 };
 
@@ -31,7 +31,15 @@ use helix_view::{
     keyboard::{KeyCode, KeyModifiers},
     Document, Editor, Theme, View,
 };
-use std::{mem::take, num::NonZeroUsize, ops, path::PathBuf, rc::Rc};
+use std::{
+    collections::HashMap,
+    mem::take,
+    num::NonZeroUsize,
+    ops,
+    path::PathBuf,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use tui::{buffer::Buffer as Surface, text::Span};
 
@@ -46,6 +54,11 @@ pub struct EditorView {
     terminal_focused: bool,
     pub(crate) explorer: ExplorerSidebar,
     pub(crate) changes: ChangesSidebar,
+    /// Cached VCS status per (canonicalized) file path, used to color buffer
+    /// names in the bufferline with the same colors as the sidebar. Refreshed
+    /// on a throttle since computing it walks the git working tree.
+    bufferline_git: HashMap<PathBuf, GitStatus>,
+    last_bufferline_git_refresh: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +84,8 @@ impl EditorView {
             terminal_focused: true,
             explorer: ExplorerSidebar::default(),
             changes: ChangesSidebar::default(),
+            bufferline_git: HashMap::new(),
+            last_bufferline_git_refresh: None,
         }
     }
 
@@ -693,8 +708,38 @@ impl EditorView {
         Some(OverlayHighlights::Homogeneous { highlight, ranges })
     }
 
+    /// Refresh the cached VCS status used to color buffer names. Throttled so we
+    /// don't walk the git working tree on every render.
+    fn refresh_bufferline_git(&mut self, editor: &Editor) {
+        use helix_loader::workspace_trust::TrustQuery;
+
+        const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+        if let Some(last) = self.last_bufferline_git_refresh {
+            if last.elapsed() < REFRESH_INTERVAL {
+                return;
+            }
+        }
+        self.last_bufferline_git_refresh = Some(Instant::now());
+
+        let (root, _) = helix_loader::find_workspace();
+        let trust_full = editor
+            .workspace_trust
+            .query(&root, TrustQuery::Git)
+            .is_trusted();
+
+        self.bufferline_git.clear();
+        let Ok(changes) = editor.diff_providers.changed_files(&root, trust_full) else {
+            return;
+        };
+        for change in changes {
+            let status = GitStatus::from_change(&change);
+            let path = helix_stdx::path::canonicalize(change.path());
+            self.bufferline_git.insert(path, status);
+        }
+    }
+
     /// Render bufferline at the top
-    pub fn render_bufferline(editor: &Editor, viewport: Rect, surface: &mut Surface) {
+    fn render_bufferline(&self, editor: &Editor, viewport: Rect, surface: &mut Surface) {
         let scratch = PathBuf::from(SCRATCH_BUFFER_NAME); // default filename to use for scratch buffer
         surface.clear_with(
             viewport,
@@ -726,11 +771,16 @@ impl EditorView {
                 .to_str()
                 .unwrap_or_default();
 
-            let style = if current_doc == doc.id() {
+            let mut style = if current_doc == doc.id() {
                 bufferline_active
             } else {
                 bufferline_inactive
             };
+
+            // Color the buffer name with its VCS status, matching the sidebar.
+            if let Some(git) = doc.path().and_then(|path| self.bufferline_git.get(path)) {
+                style = style.patch(git.style(&editor.theme));
+            }
 
             let text = format!(" {}{} ", fname, if doc.is_modified() { "[+]" } else { "" });
             let used_width = viewport.x.saturating_sub(x);
@@ -1716,7 +1766,8 @@ impl Component for EditorView {
         cx.editor.resize(editor_area);
 
         if use_bufferline {
-            Self::render_bufferline(cx.editor, area.with_height(1), surface);
+            self.refresh_bufferline_git(cx.editor);
+            self.render_bufferline(cx.editor, area.with_height(1), surface);
         }
 
         for (view, is_focused) in cx.editor.tree.views() {
