@@ -54,9 +54,6 @@ pub struct EditorView {
     terminal_focused: bool,
     pub(crate) explorer: ExplorerSidebar,
     pub(crate) changes: ChangesSidebar,
-    /// Cached VCS status per (canonicalized) file path, used to color buffer
-    /// names in the bufferline with the same colors as the sidebar. Refreshed
-    /// on a throttle since computing it walks the git working tree.
     bufferline_git: HashMap<PathBuf, GitStatus>,
     last_bufferline_git_refresh: Option<Instant>,
 }
@@ -93,8 +90,6 @@ impl EditorView {
         &mut self.spinners
     }
 
-    /// Toggle the file explorer sidebar open/closed. When opening, `current_file`
-    /// (if any) is revealed and selected in the tree.
     pub fn toggle_explorer(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
         self.explorer.toggle(current_file, editor);
         if self.explorer.is_open() {
@@ -102,16 +97,11 @@ impl EditorView {
         }
     }
 
-    /// Open (if needed) and focus the file explorer sidebar, revealing
-    /// `current_file` (if any).
     pub fn focus_explorer(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
         self.explorer.focus(current_file, editor);
         self.changes.close();
     }
 
-    /// Open and focus the git changes sidebar. If it is already open but
-    /// unfocused (the editor has focus), this just gives it focus; if it is
-    /// already focused, it closes. The two left sidebars are mutually exclusive.
     pub fn toggle_changes(&mut self, editor: &Editor) {
         if self.changes.is_open() && !self.changes.is_focused() {
             self.changes.focus_panel();
@@ -708,8 +698,6 @@ impl EditorView {
         Some(OverlayHighlights::Homogeneous { highlight, ranges })
     }
 
-    /// Refresh the cached VCS status used to color buffer names. Throttled so we
-    /// don't walk the git working tree on every render.
     fn refresh_bufferline_git(&mut self, editor: &Editor) {
         use helix_loader::workspace_trust::TrustQuery;
 
@@ -777,7 +765,6 @@ impl EditorView {
                 bufferline_inactive
             };
 
-            // Color the buffer name with its VCS status, matching the sidebar.
             if let Some(git) = doc.path().and_then(|path| self.bufferline_git.get(path)) {
                 style = style.patch(git.style(&editor.theme));
             }
@@ -1536,10 +1523,6 @@ impl Component for EditorView {
         event: &Event,
         context: &mut crate::compositor::Context,
     ) -> EventResult {
-        // When a left sidebar holds focus, key events are routed to it instead
-        // of the editor — except a few keys that fall through to the normal
-        // keymap so the leader menu (e.g. `space e`/`space g` to switch
-        // sidebars) and the command line still work from within a sidebar.
         if self.explorer.is_focused() || self.changes.is_focused() {
             if let Event::Key(key) = event {
                 let mut key = *key;
@@ -1557,7 +1540,6 @@ impl Component for EditorView {
                         return self.changes.handle_key(key, context.editor);
                     }
                 }
-                // otherwise: fall through to normal keymap handling below.
             }
         }
         let mut cx = commands::Context {
@@ -1742,8 +1724,6 @@ impl Component for EditorView {
             editor_area = editor_area.clip_top(1);
         }
 
-        // Carve out a strip on the left for the file explorer, if open. The
-        // editor then lays out its splits within the remaining area.
         let explorer_area = if self.explorer.is_open() {
             let width = self.explorer.width().min(editor_area.width);
             let left = editor_area.with_width(width);
@@ -1872,7 +1852,6 @@ impl Component for EditorView {
     }
 
     fn cursor(&self, _area: Rect, editor: &Editor) -> (Option<Position>, CursorKind) {
-        // Hide the editor cursor while a left sidebar holds focus.
         if self.explorer.is_focused() || self.changes.is_focused() {
             return (None, CursorKind::Hidden);
         }

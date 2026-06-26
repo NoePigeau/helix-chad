@@ -13,12 +13,8 @@ use tui::buffer::Buffer as Surface;
 
 use crate::compositor::{Callback, EventResult};
 
-/// Default width (in columns) of the changes sidebar. Kept in sync with the
-/// file explorer's width so both left sidebars match.
 const DEFAULT_WIDTH: u16 = 30;
 
-/// The kind of change a file underwent, used both to group files and to color
-/// them. Mirrors the explorer's VCS colors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChangeStatus {
     Added,
@@ -35,7 +31,6 @@ impl ChangeStatus {
         }
     }
 
-    /// Single-character marker shown before a file name.
     fn sigil(self) -> char {
         match self {
             Self::Added => '+',
@@ -45,10 +40,8 @@ impl ChangeStatus {
     }
 }
 
-/// A node in a group's change tree.
 #[derive(Debug)]
 struct Entry {
-    /// Display name (a single segment, or a compressed `a/b/c` chain).
     name: String,
     path: PathBuf,
     is_dir: bool,
@@ -56,7 +49,6 @@ struct Entry {
     children: Vec<Entry>,
 }
 
-/// A status group (e.g. "Modified") with its own tree of changed files.
 #[derive(Debug)]
 struct Group {
     status: ChangeStatus,
@@ -72,8 +64,6 @@ enum RowKind {
     File,
 }
 
-/// A single visible line, flattened from the groups/trees for rendering and
-/// navigation.
 #[derive(Debug)]
 struct Row {
     depth: usize,
@@ -84,8 +74,6 @@ struct Row {
     expanded: bool,
 }
 
-/// A sidebar listing the working tree's git changes, grouped by status and
-/// rendered as a compressed tree (à la Zed's source-control panel).
 #[derive(Debug)]
 pub struct ChangesSidebar {
     open: bool,
@@ -126,7 +114,6 @@ impl ChangesSidebar {
         self.width
     }
 
-    /// Close the sidebar entirely (used when another left sidebar opens).
     pub fn close(&mut self) {
         self.open = false;
         self.focused = false;
@@ -136,16 +123,12 @@ impl ChangesSidebar {
         self.focused = false;
     }
 
-    /// Give focus to the sidebar when it is already open (e.g. coming from a
-    /// buffer or another sidebar) without rebuilding the change set.
     pub fn focus_panel(&mut self) {
         if self.open {
             self.focused = true;
         }
     }
 
-    /// Toggle the sidebar open/closed. Opening refreshes the change set and
-    /// gives it focus.
     pub fn toggle(&mut self, editor: &Editor) {
         if self.open {
             self.close();
@@ -156,7 +139,6 @@ impl ChangesSidebar {
         }
     }
 
-    /// Rebuild the change set from the editor's diff providers.
     fn refresh(&mut self, editor: &Editor) {
         use helix_loader::workspace_trust::TrustQuery;
 
@@ -229,7 +211,6 @@ impl ChangesSidebar {
         self.scroll = 0;
     }
 
-    /// Flatten the groups/trees into the visible `rows` based on expansion.
     fn rebuild_rows(&mut self) {
         let mut rows = Vec::new();
         for group in &self.groups {
@@ -299,8 +280,6 @@ impl ChangesSidebar {
                 EventResult::Consumed(None)
             }
             RowKind::File => {
-                // Open the file in the editor (replacing the current view) and
-                // hand focus back to it.
                 let path = row.path.clone();
                 self.unfocus();
                 let callback: Callback = Box::new(move |_compositor, cx| {
@@ -324,7 +303,6 @@ impl ChangesSidebar {
             KeyCode::Char('k') | KeyCode::Up => self.move_selection(-1),
             KeyCode::Char('l') | KeyCode::Enter | KeyCode::Right => return self.activate(),
             KeyCode::Char('h') | KeyCode::Left => {
-                // Collapse the selected group/directory if it is expanded.
                 if let Some(row) = self.rows.get(self.selected) {
                     match row.kind {
                         RowKind::Group if row.expanded => {
@@ -377,7 +355,6 @@ impl ChangesSidebar {
 
         surface.set_style(area, background);
 
-        // Vertical separator on the last column, like the explorer.
         let separator_style = theme.get("ui.window");
         let separator_x = area.right().saturating_sub(1);
         for y in area.top()..area.bottom() {
@@ -433,9 +410,6 @@ impl ChangesSidebar {
     }
 }
 
-/// Insert a relative path (`comps`) into `children`, creating intermediate
-/// directory nodes as needed. `base` is the absolute path of `children`'s
-/// container.
 fn insert_path(children: &mut Vec<Entry>, base: &Path, comps: &[&str]) {
     let Some((first, rest)) = comps.split_first() else {
         return;
@@ -460,7 +434,6 @@ fn insert_path(children: &mut Vec<Entry>, base: &Path, comps: &[&str]) {
     }
 }
 
-/// Collapse chains of single-child directories into one node (`a` → `a/b/c`).
 fn compress(entry: &mut Entry) {
     for child in &mut entry.children {
         compress(child);
@@ -473,7 +446,6 @@ fn compress(entry: &mut Entry) {
     }
 }
 
-/// Sort entries with directories first, then case-insensitively by name.
 fn sort_entries(entries: &mut Vec<Entry>) {
     entries.sort_by(|a, b| {
         b.is_dir

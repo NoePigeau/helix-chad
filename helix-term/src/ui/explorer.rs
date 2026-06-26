@@ -17,25 +17,18 @@ use crate::compositor::{Callback, Compositor, Context, EventResult};
 use crate::job;
 use crate::ui::{completers, EditorView, Prompt, PromptEvent};
 
-/// Default width (in columns) of the file explorer sidebar.
 const DEFAULT_WIDTH: u16 = 30;
 
 const LEFT_PADDING: u16 = 1;
 
-/// VCS status of a file, used to color its entry in the tree (and buffer names
-/// in the bufferline).
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum GitStatus {
-    /// Untracked / newly added.
     Added,
-    /// Tracked and changed (modified, conflicted or renamed).
     Modified,
-    /// Deleted from the working tree.
     Deleted,
 }
 
 impl GitStatus {
-    /// Higher rank wins when a directory aggregates several statuses.
     fn rank(self) -> u8 {
         match self {
             Self::Added => 1,
@@ -44,7 +37,6 @@ impl GitStatus {
         }
     }
 
-    /// Map a VCS change to the status used to color its entry.
     pub(crate) fn from_change(change: &FileChange) -> Self {
         match change {
             FileChange::Untracked { .. } => Self::Added,
@@ -55,8 +47,6 @@ impl GitStatus {
         }
     }
 
-    /// VCS color, overridable through the theme, otherwise hardcoded. Shared
-    /// with the bufferline so buffer names use the same colors as the sidebar.
     pub(crate) fn style(self, theme: &Theme) -> Style {
         let (key, fallback) = match self {
             Self::Added => ("version_control.added", Color::Rgb(0x27, 0xA6, 0x57)),
@@ -69,22 +59,14 @@ impl GitStatus {
     }
 }
 
-/// A single visible line in the flattened file tree.
 #[derive(Debug)]
 struct TreeNode {
     path: PathBuf,
     depth: usize,
     is_dir: bool,
-    /// Only meaningful for directories.
     expanded: bool,
 }
 
-/// A simple file explorer rendered as a sidebar on the left of the editor.
-///
-/// The tree is kept as a flattened list of the currently *visible* nodes
-/// (`nodes`). Expanding a directory inserts its children right after it;
-/// collapsing removes its descendants. This keeps rendering and keyboard
-/// navigation trivial: one screen line maps to one entry in `nodes`.
 #[derive(Debug)]
 pub struct ExplorerSidebar {
     open: bool,
@@ -94,7 +76,6 @@ pub struct ExplorerSidebar {
     nodes: Vec<TreeNode>,
     selected: usize,
     scroll: usize,
-    /// VCS status per (canonicalized) path, refreshed when the tree is opened.
     git_status: HashMap<PathBuf, GitStatus>,
 }
 
@@ -126,10 +107,6 @@ impl ExplorerSidebar {
         self.width
     }
 
-    /// Open the explorer and give it focus, revealing `current_file` if any.
-    ///
-    /// The tree state is preserved across closes: it is only rebuilt on the
-    /// first open or when the workspace root changes.
     fn open_and_focus(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
         let root = helix_stdx::path::canonicalize(helix_loader::find_workspace().0);
         if self.nodes.is_empty() || self.root != root {
@@ -146,7 +123,6 @@ impl ExplorerSidebar {
         }
     }
 
-    /// Toggle the explorer open/closed. Opening also gives it focus.
     pub fn toggle(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
         if self.open {
             self.open = false;
@@ -156,12 +132,10 @@ impl ExplorerSidebar {
         }
     }
 
-    /// Open (if needed) and focus the explorer, revealing `current_file`.
     pub fn focus(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
         self.open_and_focus(current_file, editor);
     }
 
-    /// Refresh the per-file VCS status map from the editor's diff providers.
     fn refresh_git_status(&mut self, editor: &Editor) {
         use helix_loader::workspace_trust::TrustQuery;
 
@@ -182,8 +156,6 @@ impl ExplorerSidebar {
             let path = helix_stdx::path::canonicalize(change.path());
             Self::mark_status(&mut self.git_status, path.clone(), status);
 
-            // Propagate the status up to every parent directory within the tree,
-            // so a folder containing changes is colored too (à la VSCode).
             let mut current = path.as_path();
             while let Some(parent) = current.parent() {
                 if parent == self.root || !parent.starts_with(&self.root) {
@@ -195,8 +167,6 @@ impl ExplorerSidebar {
         }
     }
 
-    /// Record `status` for `path`. When a directory aggregates several kinds of
-    /// changes, the highest-ranked status wins.
     fn mark_status(map: &mut HashMap<PathBuf, GitStatus>, path: PathBuf, status: GitStatus) {
         let entry = map.entry(path).or_insert(status);
         if status.rank() > entry.rank() {
@@ -204,7 +174,6 @@ impl ExplorerSidebar {
         }
     }
 
-    /// Expand the parent directories of `target` and select it in the tree.
     fn reveal(&mut self, target: &Path) {
         let target = helix_stdx::path::canonicalize(target);
         let Ok(rel) = target.strip_prefix(&self.root) else {
@@ -227,19 +196,15 @@ impl ExplorerSidebar {
         }
     }
 
-    /// Give focus back to the editor without closing the explorer.
     fn unfocus(&mut self) {
         self.focused = false;
     }
 
-    /// Close the explorer entirely (used when another left sidebar opens).
     pub fn close(&mut self) {
         self.open = false;
         self.focused = false;
     }
 
-    /// Read entries of `dir`, sorted with directories first then files,
-    /// each compared case-insensitively by file name.
     fn read_dir(dir: &Path) -> Vec<(PathBuf, bool)> {
         let mut entries: Vec<(PathBuf, bool)> = match std::fs::read_dir(dir) {
             Ok(read) => read
@@ -265,8 +230,6 @@ impl ExplorerSidebar {
         entries
     }
 
-    /// Rebuild the tree from disk, preserving which directories were expanded
-    /// and which entry was selected.
     fn reload(&mut self) {
         let expanded: HashSet<PathBuf> = self
             .nodes
@@ -287,9 +250,6 @@ impl ExplorerSidebar {
             })
             .collect();
 
-        // Re-expand directories that were open before. Expanding inserts the
-        // children right after the directory, so the forward walk reaches them
-        // too and restores nested expansion.
         let mut index = 0;
         while index < self.nodes.len() {
             let node = &self.nodes[index];
@@ -305,7 +265,6 @@ impl ExplorerSidebar {
         self.scroll = 0;
     }
 
-    /// Expand the directory at `index`, inserting its children right after it.
     fn expand(&mut self, index: usize) {
         let (path, depth) = {
             let node = &self.nodes[index];
@@ -329,7 +288,6 @@ impl ExplorerSidebar {
         self.nodes.splice(index + 1..index + 1, children);
     }
 
-    /// Collapse the directory at `index`, removing all of its descendants.
     fn collapse(&mut self, index: usize) {
         let depth = self.nodes[index].depth;
         let mut end = index + 1;
@@ -340,7 +298,6 @@ impl ExplorerSidebar {
         self.nodes[index].expanded = false;
     }
 
-    /// Collapse every directory, leaving only the root's direct children.
     fn collapse_all(&mut self) {
         self.nodes.retain(|node| node.depth == 0);
         for node in &mut self.nodes {
@@ -358,7 +315,6 @@ impl ExplorerSidebar {
         self.selected = (self.selected as isize + delta).clamp(0, last as isize) as usize;
     }
 
-    /// Activate the selected entry: toggle a directory or open a file.
     fn activate(&mut self, editor: &mut Editor) {
         let Some(node) = self.nodes.get(self.selected) else {
             return;
@@ -390,8 +346,6 @@ impl ExplorerSidebar {
             KeyCode::Char('k') | KeyCode::Up => self.move_selection(-1),
             KeyCode::Char('l') | KeyCode::Enter | KeyCode::Right => self.activate(editor),
             KeyCode::Char('h') | KeyCode::Left => {
-                // Collapse the selected directory if expanded, otherwise jump
-                // to and collapse the parent.
                 if let Some(node) = self.nodes.get(self.selected) {
                     if node.is_dir && node.expanded {
                         self.collapse(self.selected);
@@ -411,8 +365,6 @@ impl ExplorerSidebar {
                 self.refresh_git_status(editor);
             }
             KeyCode::Char('a') => {
-                // Create a file/directory at the cursor location: inside the
-                // selected directory, or alongside the selected file.
                 let target_dir = match self.nodes.get(self.selected) {
                     Some(node) if node.is_dir => node.path.clone(),
                     Some(node) => node
@@ -444,16 +396,12 @@ impl ExplorerSidebar {
         EventResult::Consumed(None)
     }
 
-    /// Reload the tree, refresh VCS status, and reveal `path` (used after a
-    /// file system operation triggered from the explorer).
     pub(crate) fn reload_and_reveal(&mut self, path: &Path, editor: &Editor) {
         self.reload();
         self.refresh_git_status(editor);
         self.reveal(path);
     }
 
-    /// Schedule a tree refresh that reveals `path` once the editor and
-    /// compositor are both available again.
     fn schedule_reveal(path: PathBuf) {
         job::dispatch_blocking(move |editor, compositor| {
             if let Some(editor_view) = compositor.find::<EditorView>() {
@@ -462,9 +410,6 @@ impl ExplorerSidebar {
         });
     }
 
-    /// Build the command-line prompt used to create a file or directory. A
-    /// trailing path separator creates a directory; intermediate directories
-    /// are created as needed.
     fn create_prompt(target_dir: PathBuf) -> Callback {
         Box::new(move |compositor: &mut Compositor, cx: &mut Context| {
             let mut prefill = target_dir.to_string_lossy().into_owned();
@@ -501,8 +446,6 @@ impl ExplorerSidebar {
         })
     }
 
-    /// Build the command-line prompt used to delete `source`. Validating
-    /// removes the path on the line (directories are removed recursively).
     fn delete_prompt(source: PathBuf) -> Callback {
         Box::new(move |compositor: &mut Compositor, cx: &mut Context| {
             let prefill = source.to_string_lossy().into_owned();
@@ -541,8 +484,6 @@ impl ExplorerSidebar {
         })
     }
 
-    /// Build the command-line prompt used to rename/move `source`. Intermediate
-    /// directories in the destination are created as needed.
     fn rename_prompt(source: PathBuf) -> Callback {
         Box::new(move |compositor: &mut Compositor, cx: &mut Context| {
             let prefill = source.to_string_lossy().into_owned();
@@ -599,16 +540,12 @@ impl ExplorerSidebar {
 
         surface.set_style(area, background);
 
-        // Reserve the last column for a vertical separator between the explorer
-        // and the editor, so text is rendered within `inner`.
         let inner = area.clip_right(1);
         let height = inner.height as usize;
 
         let content_x = inner.x + LEFT_PADDING;
         let content_width = inner.width.saturating_sub(LEFT_PADDING);
 
-        // Draw the separator line (styled via the `ui.window` theme key, like
-        // window split borders).
         let separator_style = theme.get("ui.window");
         let separator_x = area.right().saturating_sub(1);
         for y in area.top()..area.bottom() {
@@ -617,7 +554,6 @@ impl ExplorerSidebar {
                 .set_style(separator_style);
         }
 
-        // Keep the selection within the visible window.
         if self.selected < self.scroll {
             self.scroll = self.selected;
         } else if height > 0 && self.selected >= self.scroll + height {
@@ -650,8 +586,6 @@ impl ExplorerSidebar {
                 .unwrap_or_default();
             let line = format!("{}{}{}", indent, marker, name);
 
-            // Color any entry (file or directory) that carries a VCS status, so
-            // the whole path leading to a change is highlighted.
             let git = self.git_status.get(&node.path).copied();
             let content_style = match git {
                 Some(status) => status.style(theme),
@@ -659,9 +593,6 @@ impl ExplorerSidebar {
                 None => text_style,
             };
             let style = if row == self.selected {
-                // On the selected line, keep the selection's background and
-                // modifiers, but preserve the git foreground color so it stays
-                // green/yellow instead of being overridden.
                 if git.is_some() {
                     let mut style = selected_style;
                     style.fg = content_style.fg;
