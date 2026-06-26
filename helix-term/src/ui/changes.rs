@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf, MAIN_SEPARATOR};
+use std::time::Duration;
 
 use helix_vcs::FileChange;
 use helix_view::{
@@ -6,13 +7,34 @@ use helix_view::{
     graphics::{Color, Modifier, Rect, Style},
     input::KeyEvent,
     keyboard::{KeyCode, KeyModifiers},
-    Editor,
+    DocumentId, Editor,
 };
 
 use tui::buffer::Buffer as Surface;
 
 use crate::compositor::{Callback, EventResult};
+use crate::job::{self, Job, Jobs};
 use crate::ui::icons;
+
+const GOTO_CHANGE_RETRY_DELAY: Duration = Duration::from_millis(16);
+const GOTO_CHANGE_MAX_ATTEMPTS: usize = 60;
+
+fn schedule_goto_first_change(jobs: &mut Jobs, doc_id: DocumentId) {
+    jobs.add(goto_first_change_job(doc_id, GOTO_CHANGE_MAX_ATTEMPTS));
+}
+
+fn goto_first_change_job(doc_id: DocumentId, attempts: usize) -> Job {
+    Job::with_callback(async move {
+        tokio::time::sleep(GOTO_CHANGE_RETRY_DELAY).await;
+        Ok(job::Callback::Followup(Box::new(move |editor| {
+            if crate::commands::goto_first_change_in_focused_doc(editor, doc_id) || attempts == 0 {
+                None
+            } else {
+                Some(goto_first_change_job(doc_id, attempts - 1))
+            }
+        })))
+    })
+}
 
 const DEFAULT_WIDTH: u16 = 30;
 const MIN_WIDTH: u16 = 15;
@@ -282,9 +304,11 @@ impl ChangesSidebar {
                 let path = row.path.clone();
                 self.unfocus();
                 let callback: Callback = Box::new(move |_compositor, cx| {
-                    if let Err(err) = cx.editor.open(&path, Action::Replace) {
-                        cx.editor
-                            .set_error(format!("Failed to open {}: {}", path.display(), err));
+                    match cx.editor.open(&path, Action::Replace) {
+                        Ok(doc_id) => schedule_goto_first_change(cx.jobs, doc_id),
+                        Err(err) => cx
+                            .editor
+                            .set_error(format!("Failed to open {}: {}", path.display(), err)),
                     }
                 });
                 EventResult::Consumed(Some(callback))

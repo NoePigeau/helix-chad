@@ -4258,6 +4258,29 @@ fn goto_first_change_impl(cx: &mut Context, reverse: bool) {
     }
 }
 
+pub fn goto_first_change_in_focused_doc(editor: &mut Editor, doc_id: DocumentId) -> bool {
+    let (view, doc) = current!(editor);
+    if doc.id() != doc_id {
+        return true;
+    }
+    let Some(handle) = doc.diff_handle() else {
+        return true;
+    };
+    let hunk = {
+        let diff = handle.load();
+        diff.nth_hunk(0)
+    };
+    if hunk == Hunk::NONE {
+        return false;
+    }
+    let range = hunk_range(hunk, doc.text().slice(..));
+    let view_id = view.id;
+    push_jump(view, doc);
+    doc.set_selection(view_id, Selection::single(range.anchor, range.head));
+    editor.ensure_cursor_in_view(view_id);
+    true
+}
+
 fn goto_next_change(cx: &mut Context) {
     goto_next_change_impl(cx, Direction::Forward)
 }
