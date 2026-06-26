@@ -20,6 +20,8 @@ use crate::ui::{completers, EditorView, Prompt, PromptEvent};
 /// Default width (in columns) of the file explorer sidebar.
 const DEFAULT_WIDTH: u16 = 30;
 
+const LEFT_PADDING: u16 = 1;
+
 /// VCS status of a file, used to color its entry in the tree (and buffer names
 /// in the bufferline).
 #[derive(Debug, Clone, Copy)]
@@ -602,6 +604,9 @@ impl ExplorerSidebar {
         let inner = area.clip_right(1);
         let height = inner.height as usize;
 
+        let content_x = inner.x + LEFT_PADDING;
+        let content_width = inner.width.saturating_sub(LEFT_PADDING);
+
         // Draw the separator line (styled via the `ui.window` theme key, like
         // window split borders).
         let separator_style = theme.get("ui.window");
@@ -631,9 +636,9 @@ impl ExplorerSidebar {
             let indent = "  ".repeat(node.depth);
             let marker = if node.is_dir {
                 if node.expanded {
-                    "▾ "
+                    " "
                 } else {
-                    "▸ "
+                    " "
                 }
             } else {
                 "  "
@@ -671,7 +676,7 @@ impl ExplorerSidebar {
             if row == self.selected {
                 surface.set_style(Rect::new(area.x, y, area.width, 1), selected_style);
             }
-            surface.set_stringn(inner.x, y, &line, inner.width as usize, style);
+            surface.set_stringn(content_x, y, &line, content_width as usize, style);
         }
     }
 }
