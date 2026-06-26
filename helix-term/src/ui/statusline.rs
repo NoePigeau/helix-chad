@@ -479,13 +479,12 @@ fn render_file_modification_indicator<'a, F>(context: &mut RenderContext<'a>, wr
 where
     F: Fn(&mut RenderContext<'a>, Span<'a>) + Copy,
 {
-    let title = if context.doc.is_modified() {
-        "[+]"
+    if context.doc.is_modified() {
+        let style = context.editor.theme.get("keyword");
+        write(context, Span::styled(" ⦁ ", style));
     } else {
-        "   "
-    };
-
-    write(context, title.into());
+        write(context, "   ".into());
+    }
 }
 
 fn render_read_only_indicator<'a, F>(context: &mut RenderContext<'a>, write: F)

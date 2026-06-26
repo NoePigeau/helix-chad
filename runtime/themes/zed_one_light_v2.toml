@@ -96,7 +96,7 @@
 "ui.gutter"                       = { bg = "bg" }
 
 "ui.statusline"                   = { fg = "fg", bg = "bg_dark" }
-"ui.statusline.inactive"          = { fg = "fg_muted", bg = "surface" }
+"ui.statusline.active"          = { fg = "fg_muted", bg = "bg" }
 "ui.statusline.normal"            = { fg = "bg", bg = "blue" }
 "ui.statusline.insert"            = { fg = "bg", bg = "diff_plus" }
 "ui.statusline.select"            = { fg = "bg", bg = "purple" }

@@ -774,12 +774,25 @@ impl EditorView {
                 style = style.patch(git.style(&editor.theme));
             }
 
-            let text = format!(" {}{} ", fname, if doc.is_modified() { "[+]" } else { "" });
-            let used_width = viewport.x.saturating_sub(x);
-            let rem_width = surface.area.width.saturating_sub(used_width);
+            let area_width = surface.area.width;
+            let rem_width = |x: u16| {
+                let used_width = viewport.x.saturating_sub(x);
+                area_width.saturating_sub(used_width) as usize
+            };
 
             x = surface
-                .set_stringn(x, viewport.y, &text, rem_width as usize, style)
+                .set_stringn(x, viewport.y, &format!(" {}", fname), rem_width(x), style)
+                .0;
+
+            if doc.is_modified() {
+                let dot_style = style.patch(editor.theme.get("keyword"));
+                x = surface
+                    .set_stringn(x, viewport.y, " ⦁", rem_width(x), dot_style)
+                    .0;
+            }
+
+            x = surface
+                .set_stringn(x, viewport.y, " ", rem_width(x), style)
                 .0;
 
             if x >= surface.area.right() {

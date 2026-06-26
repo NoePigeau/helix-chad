@@ -667,7 +667,16 @@ impl ExplorerSidebar {
             };
             let glyph = format!("{} ", icon);
             let (x, _) = surface.set_stringn(x, y, &glyph, end.saturating_sub(x) as usize, icon_style);
-            surface.set_stringn(x, y, &name, end.saturating_sub(x) as usize, style);
+            let (x, _) = surface.set_stringn(x, y, &name, end.saturating_sub(x) as usize, style);
+
+            let is_modified = !node.is_dir
+                && editor
+                    .document_by_path(&node.path)
+                    .is_some_and(|doc| doc.is_modified());
+            if is_modified {
+                let dot_style = style.patch(theme.get("keyword"));
+                surface.set_stringn(x, y, " ⦁", end.saturating_sub(x) as usize, dot_style);
+            }
         }
     }
 }
