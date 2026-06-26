@@ -15,6 +15,8 @@ use crate::compositor::{Callback, EventResult};
 use crate::ui::icons;
 
 const DEFAULT_WIDTH: u16 = 30;
+const MIN_WIDTH: u16 = 15;
+const MAX_WIDTH: u16 = 80;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChangeStatus {
@@ -105,6 +107,10 @@ impl ChangesSidebar {
 
     pub fn width(&self) -> u16 {
         self.width
+    }
+
+    pub fn set_width(&mut self, width: u16) {
+        self.width = width.clamp(MIN_WIDTH, MAX_WIDTH);
     }
 
     pub fn close(&mut self) {

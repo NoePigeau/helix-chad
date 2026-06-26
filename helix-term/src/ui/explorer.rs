@@ -18,6 +18,8 @@ use crate::job;
 use crate::ui::{completers, icons, EditorView, Prompt, PromptEvent};
 
 const DEFAULT_WIDTH: u16 = 30;
+const MIN_WIDTH: u16 = 15;
+const MAX_WIDTH: u16 = 80;
 
 const LEFT_PADDING: u16 = 1;
 
@@ -106,6 +108,10 @@ impl ExplorerSidebar {
 
     pub fn width(&self) -> u16 {
         self.width
+    }
+
+    pub fn set_width(&mut self, width: u16) {
+        self.width = width.clamp(MIN_WIDTH, MAX_WIDTH);
     }
 
     fn open_and_focus(&mut self, current_file: Option<PathBuf>, editor: &Editor) {

@@ -51,6 +51,7 @@ Inside a sidebar:
 | `j` / `k` | Move up / down |
 | `l` / `Enter` | Expand folder or open file |
 | `h` | Collapse / go to parent |
+| `Ctrl-→` / `Ctrl-←` | Widen / narrow the sidebar (both sidebars stay the same width) |
 | `R` | Reload |
 | `q` / `Esc` | Return focus to the editor |
 

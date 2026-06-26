@@ -1517,6 +1517,8 @@ impl EditorView {
     }
 }
 
+const SIDEBAR_RESIZE_STEP: u16 = 4;
+
 impl Component for EditorView {
     fn handle_event(
         &mut self,
@@ -1527,6 +1529,24 @@ impl Component for EditorView {
             if let Event::Key(key) = event {
                 let mut key = *key;
                 canonicalize_key(&mut key);
+
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(key.code, KeyCode::Left | KeyCode::Right)
+                {
+                    let current = if self.explorer.is_focused() {
+                        self.explorer.width()
+                    } else {
+                        self.changes.width()
+                    };
+                    let new_width = if key.code == KeyCode::Right {
+                        current.saturating_add(SIDEBAR_RESIZE_STEP)
+                    } else {
+                        current.saturating_sub(SIDEBAR_RESIZE_STEP)
+                    };
+                    self.explorer.set_width(new_width);
+                    self.changes.set_width(new_width);
+                    return EventResult::Consumed(None);
+                }
 
                 let mid_chord = !self.keymaps.pending().is_empty();
                 let leader = matches!(
