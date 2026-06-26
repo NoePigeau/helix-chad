@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 use helix_vcs::FileChange;
 use helix_view::{
     editor::Action,
-    graphics::{Color, Rect, Style},
+    graphics::{Color, Modifier, Rect, Style},
     input::KeyEvent,
     keyboard::{KeyCode, KeyModifiers},
     theme::Theme,
@@ -15,7 +15,7 @@ use tui::buffer::Buffer as Surface;
 
 use crate::compositor::{Callback, Compositor, Context, EventResult};
 use crate::job;
-use crate::ui::{completers, EditorView, Prompt, PromptEvent};
+use crate::ui::{completers, icons, EditorView, Prompt, PromptEvent};
 
 const DEFAULT_WIDTH: u16 = 30;
 
@@ -65,6 +65,7 @@ struct TreeNode {
     depth: usize,
     is_dir: bool,
     expanded: bool,
+    ignored: bool,
 }
 
 #[derive(Debug)]
@@ -205,7 +206,7 @@ impl ExplorerSidebar {
         self.focused = false;
     }
 
-    fn read_dir(dir: &Path) -> Vec<(PathBuf, bool)> {
+    fn read_dir(dir: &Path, parent_ignored: bool) -> Vec<(PathBuf, bool, bool)> {
         let mut entries: Vec<(PathBuf, bool)> = match std::fs::read_dir(dir) {
             Ok(read) => read
                 .flatten()
@@ -227,7 +228,34 @@ impl ExplorerSidebar {
             })
         });
 
+        let not_ignored = if parent_ignored {
+            HashSet::new()
+        } else {
+            Self::not_ignored(dir)
+        };
+
         entries
+            .into_iter()
+            .map(|(path, is_dir)| {
+                let ignored = parent_ignored || !not_ignored.contains(&path);
+                (path, is_dir, ignored)
+            })
+            .collect()
+    }
+
+    fn not_ignored(dir: &Path) -> HashSet<PathBuf> {
+        ignore::WalkBuilder::new(dir)
+            .max_depth(Some(1))
+            .hidden(false)
+            .parents(true)
+            .git_ignore(true)
+            .git_global(true)
+            .git_exclude(true)
+            .ignore(false)
+            .build()
+            .flatten()
+            .map(|entry| entry.into_path())
+            .collect()
     }
 
     fn reload(&mut self) {
@@ -240,13 +268,14 @@ impl ExplorerSidebar {
         let selected_path = self.nodes.get(self.selected).map(|node| node.path.clone());
 
         let root = self.root.clone();
-        self.nodes = Self::read_dir(&root)
+        self.nodes = Self::read_dir(&root, false)
             .into_iter()
-            .map(|(path, is_dir)| TreeNode {
+            .map(|(path, is_dir, ignored)| TreeNode {
                 path,
                 depth: 0,
                 is_dir,
                 expanded: false,
+                ignored,
             })
             .collect();
 
@@ -266,21 +295,22 @@ impl ExplorerSidebar {
     }
 
     fn expand(&mut self, index: usize) {
-        let (path, depth) = {
+        let (path, depth, parent_ignored) = {
             let node = &self.nodes[index];
             if !node.is_dir || node.expanded {
                 return;
             }
-            (node.path.clone(), node.depth)
+            (node.path.clone(), node.depth, node.ignored)
         };
 
-        let children: Vec<TreeNode> = Self::read_dir(&path)
+        let children: Vec<TreeNode> = Self::read_dir(&path, parent_ignored)
             .into_iter()
-            .map(|(path, is_dir)| TreeNode {
+            .map(|(path, is_dir, ignored)| TreeNode {
                 path,
                 depth: depth + 1,
                 is_dir,
                 expanded: false,
+                ignored,
             })
             .collect();
 
@@ -532,6 +562,8 @@ impl ExplorerSidebar {
         let background = theme.get("ui.background");
         let text_style = theme.get("ui.text");
         let dir_style = theme.get("ui.text.focus");
+        let ignored_fg = Color::Rgb(0x9a, 0xa5, 0xb1);
+        let ignored_style = Style::default().fg(ignored_fg).add_modifier(Modifier::ITALIC);
         let selected_style = if self.focused {
             theme.get("ui.menu.selected")
         } else {
@@ -570,32 +602,29 @@ impl ExplorerSidebar {
             let y = inner.y + (row - self.scroll) as u16;
 
             let indent = "  ".repeat(node.depth);
-            let marker = if node.is_dir {
-                if node.expanded {
-                    " "
-                } else {
-                    " "
-                }
-            } else {
-                "  "
-            };
             let name = node
                 .path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let line = format!("{}{}{}", indent, marker, name);
 
             let git = self.git_status.get(&node.path).copied();
-            let content_style = match git {
-                Some(status) => status.style(theme),
-                None if node.is_dir => dir_style,
-                None => text_style,
+            let content_style = if node.ignored {
+                ignored_style
+            } else {
+                match git {
+                    Some(status) => status.style(theme),
+                    None if node.is_dir => dir_style,
+                    None => text_style,
+                }
             };
             let style = if row == self.selected {
-                if git.is_some() {
+                if node.ignored || git.is_some() {
                     let mut style = selected_style;
                     style.fg = content_style.fg;
+                    if node.ignored {
+                        style = style.add_modifier(Modifier::ITALIC);
+                    }
                     style
                 } else {
                     selected_style
@@ -607,7 +636,24 @@ impl ExplorerSidebar {
             if row == self.selected {
                 surface.set_style(Rect::new(area.x, y, area.width, 1), selected_style);
             }
-            surface.set_stringn(content_x, y, &line, content_width as usize, style);
+
+            let end = content_x + content_width;
+            let (x, _) = surface.set_stringn(content_x, y, &indent, content_width as usize, style);
+            let (icon, icon_color) = if node.is_dir {
+                let (glyph, _) = icons::folder_icon(node.expanded);
+                (glyph, dir_style.fg)
+            } else {
+                let (glyph, color) = icons::file_icon(&node.path);
+                (glyph, Some(color))
+            };
+            let icon_style = if node.ignored {
+                Style::default().fg(ignored_fg)
+            } else {
+                Style::default().fg(icon_color.unwrap_or(Color::Reset))
+            };
+            let glyph = format!("{} ", icon);
+            let (x, _) = surface.set_stringn(x, y, &glyph, end.saturating_sub(x) as usize, icon_style);
+            surface.set_stringn(x, y, &name, end.saturating_sub(x) as usize, style);
         }
     }
 }

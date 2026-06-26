@@ -12,6 +12,7 @@ use helix_view::{
 use tui::buffer::Buffer as Surface;
 
 use crate::compositor::{Callback, EventResult};
+use crate::ui::icons;
 
 const DEFAULT_WIDTH: u16 = 30;
 
@@ -28,14 +29,6 @@ impl ChangeStatus {
             Self::Added => "Added",
             Self::Modified => "Modified",
             Self::Deleted => "Deleted",
-        }
-    }
-
-    fn sigil(self) -> char {
-        match self {
-            Self::Added => '+',
-            Self::Modified => '~',
-            Self::Deleted => '-',
         }
     }
 }
@@ -381,18 +374,11 @@ impl ChangesSidebar {
             let y = inner.y + (index - self.scroll) as u16;
             let indent = "  ".repeat(row.depth);
 
-            let (marker, content_style) = match row.kind {
-                RowKind::Group => (
-                    if row.expanded { "▾ " } else { "▸ " }.to_string(),
-                    header_style,
-                ),
-                RowKind::Dir => (
-                    if row.expanded { "▾ " } else { "▸ " }.to_string(),
-                    dir_style,
-                ),
-                RowKind::File => (format!("{} ", row.status.sigil()), status_style(row.status)),
+            let content_style = match row.kind {
+                RowKind::Group => header_style,
+                RowKind::Dir => dir_style,
+                RowKind::File => status_style(row.status),
             };
-            let line = format!("{}{}{}", indent, marker, row.label);
 
             let style = if index == self.selected {
                 let mut style = selected_style;
@@ -405,7 +391,25 @@ impl ChangesSidebar {
             if index == self.selected {
                 surface.set_style(Rect::new(area.x, y, area.width, 1), selected_style);
             }
-            surface.set_stringn(inner.x, y, &line, inner.width as usize, style);
+
+            if let RowKind::Group = row.kind {
+                let marker = if row.expanded { "\u{25be} " } else { "\u{25b8} " };
+                let line = format!("{}{}{}", indent, marker, row.label);
+                surface.set_stringn(inner.x, y, &line, inner.width as usize, style);
+            } else {
+                let end = inner.x + inner.width;
+                let (x, _) = surface.set_stringn(inner.x, y, &indent, inner.width as usize, style);
+                let (icon, color) = if let RowKind::Dir = row.kind {
+                    let (glyph, _) = icons::folder_icon(row.expanded);
+                    (glyph, dir_style.fg.unwrap_or(Color::Reset))
+                } else {
+                    icons::file_icon(Path::new(&row.label))
+                };
+                let glyph = format!("{} ", icon);
+                let (x, _) =
+                    surface.set_stringn(x, y, &glyph, end.saturating_sub(x) as usize, Style::default().fg(color));
+                surface.set_stringn(x, y, &row.label, end.saturating_sub(x) as usize, style);
+            }
         }
     }
 }
