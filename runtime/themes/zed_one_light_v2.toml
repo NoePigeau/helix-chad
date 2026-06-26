@@ -1,0 +1,169 @@
+# Author : Noé Pigeau <noe@hubvisor.io>
+# Zed "One Light" ported to Helix
+# Colors taken verbatim from Zed's assets/themes/one/one.json ("One Light").
+# Semi-transparent Zed values were flattened over the editor bg (#fafafa),
+# since Helix hex colors do not support an alpha channel.
+
+# --- Syntax ---------------------------------------------------------------
+
+"attribute"                       = "blue"
+"label"                           = "blue"
+"tag"                             = "blue"
+"constructor"                     = "blue"
+"namespace"                       = "fg"
+"module"                          = "fg"
+
+"type"                            = "type_blue"
+"type.enum.variant"               = "func_blue"
+
+"constant"                        = "gold"
+"constant.builtin"                = "orange"
+"constant.builtin.boolean"        = "orange"
+"constant.character"              = "green"
+"constant.character.escape"       = "comment_doc"
+"constant.numeric"                = "orange"
+
+"string"                          = "green"
+"string.regexp"                   = "orange"
+"string.special"                  = "orange"
+"string.special.symbol"           = "orange"
+
+"comment"                         = "comment"
+"comment.line.documentation"      = "comment_doc"
+"comment.block.documentation"     = "comment_doc"
+
+"variable"                        = "fg"
+"variable.builtin"                = "orange"
+"variable.parameter"              = "fg"
+"variable.other.member"           = "red"
+
+"punctuation"                     = "fg"
+"punctuation.delimiter"           = "punct_muted"
+"punctuation.bracket"             = "punct_muted"
+"punctuation.special"             = "special_red"
+
+"keyword"                         = "purple"
+"keyword.directive"               = "purple"
+"keyword.control.import"          = "purple"
+
+"operator"                        = "type_blue"
+
+"function"                        = "func_blue"
+"function.builtin"                = "func_blue"
+"function.method"                 = "func_blue"
+"function.macro"                  = "func_blue"
+
+# --- Markup ---------------------------------------------------------------
+
+"markup.heading"                  = "red"
+"markup.heading.marker"           = "red"
+"markup.list"                     = "red"
+"markup.list.numbered"            = "red"
+"markup.list.unnumbered"          = "red"
+"markup.bold"                     = { fg = "orange", modifiers = ["bold"] }
+"markup.italic"                   = { fg = "blue", modifiers = ["italic"] }
+"markup.link.text"                = { fg = "func_blue", modifiers = ["italic"] }
+"markup.link.url"                 = "type_blue"
+"markup.raw"                      = "green"
+"markup.raw.inline"               = "green"
+"markup.quote"                    = "comment"
+
+# --- Diff -----------------------------------------------------------------
+
+"diff.plus"                       = "diff_plus"
+"diff.minus"                      = "diff_minus"
+"diff.delta"                      = "vc_modified"
+
+# --- UI -------------------------------------------------------------------
+
+"ui.background"                   = { bg = "bg" }
+"ui.text"                         = { fg = "fg" }
+"ui.text.focus"                   = { fg = "purple", modifiers = ["bold"] }
+"ui.text.inactive"                = { fg = "fg_muted" }
+
+"ui.cursor"                       = { fg = "bg", bg = "fg_muted" }
+"ui.cursor.primary"               = { fg = "bg", bg = "blue" }
+"ui.cursor.match"                 = { bg = "hl_read", modifiers = ["bold"] }
+
+"ui.selection"                    = { bg = "selection" }
+"ui.selection.primary"            = { bg = "selection" }
+
+"ui.cursorline.primary"           = { bg = "cursorline" }
+"ui.cursorline.secondary"         = { bg = "cursorline" }
+
+"ui.linenr"                       = { fg = "linenr" }
+"ui.linenr.selected"              = { fg = "linenr_active", modifiers = ["bold"] }
+"ui.gutter"                       = { bg = "bg" }
+
+"ui.statusline"                   = { fg = "fg", bg = "bg_dark" }
+"ui.statusline.inactive"          = { fg = "fg_muted", bg = "surface" }
+"ui.statusline.normal"            = { fg = "bg", bg = "blue" }
+"ui.statusline.insert"            = { fg = "bg", bg = "diff_plus" }
+"ui.statusline.select"            = { fg = "bg", bg = "purple" }
+
+"ui.popup"                        = { fg = "fg", bg = "surface" }
+"ui.window"                       = { fg = "border", bg = "bg" }
+"ui.help"                         = { fg = "fg", bg = "surface" }
+
+"ui.menu"                         = { fg = "fg", bg = "surface" }
+"ui.menu.selected"                = { fg = "purple", bg = "selection" }
+"ui.menu.scroll"                  = { fg = "blue", bg = "surface" }
+
+"ui.virtual.ruler"                = { bg = "surface" }
+"ui.virtual.whitespace"           = { fg = "linenr" }
+"ui.virtual.indent-guide"         = { fg = "border" }
+"ui.virtual.inlay-hint"           = { fg = "hint" }
+"ui.virtual.jump-label"           = { fg = "red", modifiers = ["bold"] }
+
+"ui.highlight"                    = { bg = "selection" }
+"ui.cursor.match.search"          = { bg = "search_match" }
+
+# --- Diagnostics ----------------------------------------------------------
+
+"diagnostic.error"                = { underline = { color = "error",   style = "curl" } }
+"diagnostic.warning"              = { underline = { color = "warning", style = "curl" } }
+"diagnostic.info"                 = { underline = { color = "blue",    style = "dotted" } }
+"diagnostic.hint"                 = { underline = { color = "hint",    style = "dashed" } }
+
+"error"                           = { fg = "error" }
+"warning"                         = { fg = "warning" }
+"info"                            = { fg = "blue" }
+"hint"                            = { fg = "hint" }
+
+# --- Palette (exact Zed One Light values; flattened where noted) -----------
+
+[palette]
+bg            = "#fafafa"   # editor.background
+bg_dark       = "#dcdcdd"   # background / status_bar.background
+surface       = "#ebebec"   # surface.background / panels
+fg            = "#242529"   # text / editor.foreground
+fg_muted      = "#58585a"   # text.muted
+linenr        = "#b4b4bb"   # editor.line_number
+linenr_active = "#44454b"   # editor.active_line_number
+border        = "#c9c9ca"   # border
+
+blue          = "#5c78e2"   # accent / attribute / tag / keyword.label
+func_blue     = "#5b79e3"   # function / variant
+type_blue     = "#3882b7"   # type / operator / enum
+purple        = "#a449ab"   # keyword
+orange        = "#ad6e25"   # number / boolean / regex
+gold          = "#c18401"   # constant
+green         = "#649f57"   # string / literal
+red           = "#d3604f"   # property / title / list marker
+special_red   = "#b92b46"   # punctuation.special
+
+comment       = "#a2a3a7"   # comment
+comment_doc   = "#7c7e86"   # comment.doc / string.escape
+punct_muted   = "#4d4f52"   # punctuation.bracket / delimiter
+hint          = "#7274a7"   # hint
+
+diff_plus     = "#50a14f"   # syntax.diff.plus
+diff_minus    = "#e45649"   # syntax.diff.minus
+vc_modified   = "#d3b020"   # version_control.modified
+error         = "#d36151"   # error
+warning       = "#a48819"   # warning
+
+selection     = "#d4dbf4"   # players[0].selection  (#5c78e2 @ 24%) over bg
+search_match  = "#bbc6f0"   # search.match_background (#5c79e2 @ 40%) over bg
+cursorline    = "#efeff0"   # editor.active_line.background (#ebebec @ 75%) over bg
+hl_read       = "#e3e7f7"   # document_highlight.read (#5c78e2 @ 14%) over bg
