@@ -113,6 +113,11 @@ impl EditorView {
         }
     }
 
+    pub fn refresh_sidebars(&mut self, editor: &Editor) {
+        self.explorer.refresh_if_open(editor);
+        self.changes.refresh_if_open(editor);
+    }
+
     pub fn render_view(
         &self,
         editor: &Editor,

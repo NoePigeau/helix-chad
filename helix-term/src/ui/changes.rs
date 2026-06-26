@@ -160,6 +160,12 @@ impl ChangesSidebar {
         }
     }
 
+    pub fn refresh_if_open(&mut self, editor: &Editor) {
+        if self.open {
+            self.refresh(editor);
+        }
+    }
+
     fn refresh(&mut self, editor: &Editor) {
         use helix_loader::workspace_trust::TrustQuery;
 

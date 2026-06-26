@@ -143,6 +143,14 @@ impl ExplorerSidebar {
         self.open_and_focus(current_file, editor);
     }
 
+    pub fn refresh_if_open(&mut self, editor: &Editor) {
+        if !self.open {
+            return;
+        }
+        self.reload();
+        self.refresh_git_status(editor);
+    }
+
     fn refresh_git_status(&mut self, editor: &Editor) {
         use helix_loader::workspace_trust::TrustQuery;
 

@@ -654,6 +654,10 @@ impl Application {
             "'{}' written, {lines}L {size}",
             get_relative_path(&doc_save_event.path).to_string_lossy(),
         ));
+
+        if let Some(editor_view) = self.compositor.find::<ui::EditorView>() {
+            editor_view.refresh_sidebars(&self.editor);
+        }
     }
 
     #[inline(always)]
