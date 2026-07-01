@@ -104,6 +104,39 @@ fn directory() {
     assert!(git::get_diff_base(&dir, true).is_err());
 }
 
+#[test]
+fn staged_and_unstaged_changes() {
+    use crate::FileChange;
+
+    let temp_git = empty_git_repo();
+    let repo = temp_git.path();
+
+    let tracked = repo.join("tracked.txt");
+    File::create(&tracked).unwrap().write_all(b"foo").unwrap();
+    create_commit(repo, true);
+
+    File::create(&tracked).unwrap().write_all(b"bar").unwrap();
+    exec_git_cmd("add tracked.txt", repo);
+
+    let staged_new = repo.join("staged_new.txt");
+    File::create(&staged_new).unwrap().write_all(b"new").unwrap();
+    exec_git_cmd("add staged_new.txt", repo);
+
+    let unstaged = repo.join("unstaged.txt");
+    File::create(&unstaged).unwrap().write_all(b"unstaged").unwrap();
+
+    let status = git::working_tree_status(repo, true).unwrap();
+
+    let staged: Vec<_> = status.staged.iter().map(FileChange::path).collect();
+    assert!(staged.contains(&tracked.as_path()));
+    assert!(staged.contains(&staged_new.as_path()));
+    assert!(!staged.contains(&unstaged.as_path()));
+
+    let unstaged_paths: Vec<_> = status.unstaged.iter().map(FileChange::path).collect();
+    assert!(unstaged_paths.contains(&unstaged.as_path()));
+    assert!(!unstaged_paths.contains(&staged_new.as_path()));
+}
+
 /// Test that `get_diff_base` resolves symlinks so that the same diff base is
 /// used as the target file.
 ///

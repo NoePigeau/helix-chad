@@ -17,7 +17,7 @@ use gix::status::{
 };
 use gix::{Commit, ObjectId, Repository, ThreadSafeRepository};
 
-use crate::FileChange;
+use crate::{FileChange, WorkingTreeStatus};
 
 #[cfg(test)]
 mod test;
@@ -91,6 +91,10 @@ pub fn for_each_changed_file(
     f: impl Fn(Result<FileChange>) -> bool,
 ) -> Result<()> {
     status(&open_repo(cwd, trust_full)?.to_thread_local(), f)
+}
+
+pub fn working_tree_status(cwd: &Path, trust_full: bool) -> Result<WorkingTreeStatus> {
+    status_with_staged(&open_repo(cwd, trust_full)?.to_thread_local())
 }
 
 fn open_repo(path: &Path, trust_full: bool) -> Result<ThreadSafeRepository> {
@@ -175,41 +179,8 @@ fn status(repo: &Repository, f: impl Fn(Result<FileChange>) -> bool) -> Result<(
         let Ok(item) = item.map_err(|err| f(Err(err.into()))) else {
             continue;
         };
-        let change = match item {
-            Item::Modification {
-                rela_path, status, ..
-            } => {
-                let path = work_dir.join(rela_path.to_path()?);
-                match status {
-                    EntryStatus::Conflict { .. } => FileChange::Conflict { path },
-                    EntryStatus::Change(Change::Removed) => FileChange::Deleted { path },
-                    EntryStatus::Change(Change::Modification { .. }) => {
-                        FileChange::Modified { path }
-                    }
-                    // Files marked with `git add --intent-to-add`. Such files
-                    // still show up as new in `git status`, so it's appropriate
-                    // to show them the same way as untracked files in the
-                    // "changed file" picker. One example of this being used
-                    // is Jujutsu, a Git-compatible VCS. It marks all new files
-                    // with `--intent-to-add` automatically.
-                    EntryStatus::IntentToAdd => FileChange::Untracked { path },
-                    _ => continue,
-                }
-            }
-            Item::DirectoryContents { entry, .. } if entry.status == Status::Untracked => {
-                FileChange::Untracked {
-                    path: work_dir.join(entry.rela_path.to_path()?),
-                }
-            }
-            Item::Rewrite {
-                source,
-                dirwalk_entry,
-                ..
-            } => FileChange::Renamed {
-                from_path: work_dir.join(source.rela_path().to_path()?),
-                to_path: work_dir.join(dirwalk_entry.rela_path.to_path()?),
-            },
-            _ => continue,
+        let Some(change) = index_worktree_change(&work_dir, item)? else {
+            continue;
         };
         if !f(Ok(change)) {
             break;
@@ -217,6 +188,113 @@ fn status(repo: &Repository, f: impl Fn(Result<FileChange>) -> bool) -> Result<(
     }
 
     Ok(())
+}
+
+fn index_worktree_change(work_dir: &Path, item: Item) -> Result<Option<FileChange>> {
+    let change = match item {
+        Item::Modification {
+            rela_path, status, ..
+        } => {
+            let path = work_dir.join(rela_path.to_path()?);
+            match status {
+                EntryStatus::Conflict { .. } => FileChange::Conflict { path },
+                EntryStatus::Change(Change::Removed) => FileChange::Deleted { path },
+                EntryStatus::Change(Change::Modification { .. }) => FileChange::Modified { path },
+                // Files marked with `git add --intent-to-add`. Such files
+                // still show up as new in `git status`, so it's appropriate
+                // to show them the same way as untracked files in the
+                // "changed file" picker. One example of this being used
+                // is Jujutsu, a Git-compatible VCS. It marks all new files
+                // with `--intent-to-add` automatically.
+                EntryStatus::IntentToAdd => FileChange::Untracked { path },
+                _ => return Ok(None),
+            }
+        }
+        Item::DirectoryContents { entry, .. } if entry.status == Status::Untracked => {
+            FileChange::Untracked {
+                path: work_dir.join(entry.rela_path.to_path()?),
+            }
+        }
+        Item::Rewrite {
+            source,
+            dirwalk_entry,
+            ..
+        } => FileChange::Renamed {
+            from_path: work_dir.join(source.rela_path().to_path()?),
+            to_path: work_dir.join(dirwalk_entry.rela_path.to_path()?),
+        },
+        _ => return Ok(None),
+    };
+    Ok(Some(change))
+}
+
+fn status_with_staged(repo: &Repository) -> Result<WorkingTreeStatus> {
+    let work_dir = repo
+        .workdir()
+        .ok_or_else(|| anyhow::anyhow!("working tree not found"))?
+        .to_path_buf();
+
+    let rewrites = Rewrites {
+        copies: None,
+        percentage: Some(0.5),
+        limit: 1000,
+        ..Default::default()
+    };
+
+    let status_platform = repo
+        .status(gix::progress::Discard)?
+        .untracked_files(UntrackedFiles::Files)
+        .index_worktree_rewrites(Some(rewrites))
+        .head_tree(repo.head_tree_id_or_empty()?.detach())
+        .tree_index_track_renames(gix::status::tree_index::TrackRenames::Given(rewrites));
+
+    let empty_patterns = Vec::<gix::bstr::BString>::new();
+
+    let mut result = WorkingTreeStatus::default();
+    for item in status_platform.into_iter(empty_patterns)? {
+        let Ok(item) = item else {
+            continue;
+        };
+        match item {
+            gix::status::Item::IndexWorktree(item) => {
+                if let Some(change) = index_worktree_change(&work_dir, item)? {
+                    result.unstaged.push(change);
+                }
+            }
+            gix::status::Item::TreeIndex(change) => {
+                if let Some(change) = tree_index_change(&work_dir, change)? {
+                    result.staged.push(change);
+                }
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+fn tree_index_change(work_dir: &Path, change: gix::diff::index::Change) -> Result<Option<FileChange>> {
+    use gix::diff::index::ChangeRef;
+
+    let change = match change {
+        ChangeRef::Addition { location, .. } => FileChange::Untracked {
+            path: work_dir.join(location.to_path()?),
+        },
+        ChangeRef::Deletion { location, .. } => FileChange::Deleted {
+            path: work_dir.join(location.to_path()?),
+        },
+        ChangeRef::Modification { location, .. } => FileChange::Modified {
+            path: work_dir.join(location.to_path()?),
+        },
+        ChangeRef::Rewrite {
+            source_location,
+            location,
+            ..
+        } => FileChange::Renamed {
+            from_path: work_dir.join(source_location.to_path()?),
+            to_path: work_dir.join(location.to_path()?),
+        },
+    };
+    Ok(Some(change))
 }
 
 /// Finds the object that contains the contents of a file at a specific commit.

@@ -17,6 +17,14 @@ pub enum FileChange {
     },
 }
 
+/// The working-tree status split into staged (HEAD vs index) and unstaged (index vs worktree)
+/// changes, mirroring the two sections shown by `git status`.
+#[derive(Default)]
+pub struct WorkingTreeStatus {
+    pub staged: Vec<FileChange>,
+    pub unstaged: Vec<FileChange>,
+}
+
 impl FileChange {
     pub fn path(&self) -> &Path {
         match self {

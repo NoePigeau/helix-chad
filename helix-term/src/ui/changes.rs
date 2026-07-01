@@ -62,6 +62,7 @@ struct Entry {
     name: String,
     path: PathBuf,
     is_dir: bool,
+    status: ChangeStatus,
     expanded: bool,
     children: Vec<Entry>,
 }
@@ -69,6 +70,7 @@ struct Entry {
 #[derive(Debug)]
 struct Group {
     status: ChangeStatus,
+    staged: bool,
     expanded: bool,
     count: usize,
     roots: Vec<Entry>,
@@ -87,6 +89,7 @@ struct Row {
     label: String,
     kind: RowKind,
     status: ChangeStatus,
+    staged: bool,
     path: PathBuf,
     expanded: bool,
 }
@@ -176,60 +179,14 @@ impl ChangesSidebar {
             .query(&helix_loader::find_workspace_in(&self.root).0, TrustQuery::Git)
             .is_trusted();
 
-        let mut added = Vec::new();
-        let mut modified = Vec::new();
-        let mut deleted = Vec::new();
+        let status = editor
+            .diff_providers
+            .working_tree_status(&self.root, trust_full)
+            .unwrap_or_default();
 
-        if let Ok(changes) = editor.diff_providers.changed_files(&self.root, trust_full) {
-            for change in changes {
-                let (status, path) = match change {
-                    FileChange::Untracked { path } => (ChangeStatus::Added, path),
-                    FileChange::Modified { path } | FileChange::Conflict { path } => {
-                        (ChangeStatus::Modified, path)
-                    }
-                    FileChange::Renamed { to_path, .. } => (ChangeStatus::Modified, to_path),
-                    FileChange::Deleted { path } => (ChangeStatus::Deleted, path),
-                };
-                let path = helix_stdx::path::canonicalize(path);
-                match status {
-                    ChangeStatus::Added => added.push(path),
-                    ChangeStatus::Modified => modified.push(path),
-                    ChangeStatus::Deleted => deleted.push(path),
-                }
-            }
-        }
-
-        self.groups = [
-            (ChangeStatus::Added, added),
-            (ChangeStatus::Modified, modified),
-            (ChangeStatus::Deleted, deleted),
-        ]
-        .into_iter()
-        .filter(|(_, files)| !files.is_empty())
-        .map(|(status, files)| {
-            let count = files.len();
-            let mut roots: Vec<Entry> = Vec::new();
-            for path in &files {
-                if let Ok(rel) = path.strip_prefix(&self.root) {
-                    let comps: Vec<&str> = rel
-                        .components()
-                        .filter_map(|c| c.as_os_str().to_str())
-                        .collect();
-                    insert_path(&mut roots, &self.root, &comps);
-                }
-            }
-            for entry in &mut roots {
-                compress(entry);
-            }
-            sort_entries(&mut roots);
-            Group {
-                status,
-                expanded: true,
-                count,
-                roots,
-            }
-        })
-        .collect();
+        let mut groups = self.build_groups(true, categorize(status.staged));
+        groups.extend(self.build_groups(false, categorize(status.unstaged)));
+        self.groups = groups;
 
         self.rebuild_rows();
         if self.selected >= self.rows.len() {
@@ -238,20 +195,89 @@ impl ChangesSidebar {
         self.scroll = 0;
     }
 
+    fn build_roots(&self, groups: &[(ChangeStatus, Vec<PathBuf>)]) -> Vec<Entry> {
+        let mut roots: Vec<Entry> = Vec::new();
+        for (status, files) in groups {
+            for path in files {
+                if let Ok(rel) = path.strip_prefix(&self.root) {
+                    let comps: Vec<&str> = rel
+                        .components()
+                        .filter_map(|c| c.as_os_str().to_str())
+                        .collect();
+                    insert_path(&mut roots, &self.root, &comps, *status);
+                }
+            }
+        }
+        for entry in &mut roots {
+            compress(entry);
+        }
+        sort_entries(&mut roots);
+        roots
+    }
+
+    fn build_groups(&self, staged: bool, buckets: [Vec<PathBuf>; 3]) -> Vec<Group> {
+        let [added, modified, deleted] = buckets;
+
+        if staged {
+            let count = added.len() + modified.len() + deleted.len();
+            if count == 0 {
+                return Vec::new();
+            }
+            let roots = self.build_roots(&[
+                (ChangeStatus::Added, added),
+                (ChangeStatus::Modified, modified),
+                (ChangeStatus::Deleted, deleted),
+            ]);
+            return vec![Group {
+                status: ChangeStatus::Modified,
+                staged: true,
+                expanded: true,
+                count,
+                roots,
+            }];
+        }
+
+        [
+            (ChangeStatus::Added, added),
+            (ChangeStatus::Modified, modified),
+            (ChangeStatus::Deleted, deleted),
+        ]
+        .into_iter()
+        .filter(|(_, files)| !files.is_empty())
+        .map(|(status, files)| {
+            let count = files.len();
+            let roots = self.build_roots(&[(status, files)]);
+            Group {
+                status,
+                staged: false,
+                expanded: true,
+                count,
+                roots,
+            }
+        })
+        .collect()
+    }
+
     fn rebuild_rows(&mut self) {
         let mut rows = Vec::new();
         for group in &self.groups {
+            let label = if group.staged {
+                format!("Staged ({})", group.count)
+            } else {
+                format!("{} ({})", group.status.label(), group.count)
+            };
             rows.push(Row {
                 depth: 0,
-                label: format!("{} ({})", group.status.label(), group.count),
+                label,
                 kind: RowKind::Group,
                 status: group.status,
+                staged: group.staged,
                 path: PathBuf::new(),
                 expanded: group.expanded,
             });
             if group.expanded {
                 for entry in &group.roots {
-                    push_entry_rows(&mut rows, entry, 1, group.status);
+                    push_entry_rows(&mut rows, entry, 1, group.status, group.staged);
                 }
             }
         }
@@ -266,16 +292,24 @@ impl ChangesSidebar {
         self.selected = (self.selected as isize + delta).clamp(0, last as isize) as usize;
     }
 
-    fn toggle_group(&mut self, status: ChangeStatus) {
-        if let Some(group) = self.groups.iter_mut().find(|g| g.status == status) {
+    fn toggle_group(&mut self, staged: bool, status: ChangeStatus) {
+        if let Some(group) = self
+            .groups
+            .iter_mut()
+            .find(|g| g.staged == staged && g.status == status)
+        {
             group.expanded = !group.expanded;
         }
         self.rebuild_rows();
         self.clamp_selection();
     }
 
-    fn toggle_dir(&mut self, status: ChangeStatus, path: &Path) {
-        if let Some(group) = self.groups.iter_mut().find(|g| g.status == status) {
+    fn toggle_dir(&mut self, staged: bool, status: ChangeStatus, path: &Path) {
+        if let Some(group) = self
+            .groups
+            .iter_mut()
+            .find(|g| g.staged == staged && g.status == status)
+        {
             if let Some(entry) = find_entry_mut(&mut group.roots, path) {
                 entry.expanded = !entry.expanded;
             }
@@ -296,14 +330,16 @@ impl ChangesSidebar {
         };
         match row.kind {
             RowKind::Group => {
+                let staged = row.staged;
                 let status = row.status;
-                self.toggle_group(status);
+                self.toggle_group(staged, status);
                 EventResult::Consumed(None)
             }
             RowKind::Dir => {
+                let staged = row.staged;
                 let status = row.status;
                 let path = row.path.clone();
-                self.toggle_dir(status, &path);
+                self.toggle_dir(staged, status, &path);
                 EventResult::Consumed(None)
             }
             RowKind::File => {
@@ -335,13 +371,15 @@ impl ChangesSidebar {
                 if let Some(row) = self.rows.get(self.selected) {
                     match row.kind {
                         RowKind::Group if row.expanded => {
+                            let staged = row.staged;
                             let status = row.status;
-                            self.toggle_group(status);
+                            self.toggle_group(staged, status);
                         }
                         RowKind::Dir if row.expanded => {
+                            let staged = row.staged;
                             let status = row.status;
                             let path = row.path.clone();
-                            self.toggle_dir(status, &path);
+                            self.toggle_dir(staged, status, &path);
                         }
                         _ => {}
                     }
@@ -450,7 +488,7 @@ impl ChangesSidebar {
     }
 }
 
-fn insert_path(children: &mut Vec<Entry>, base: &Path, comps: &[&str]) {
+fn insert_path(children: &mut Vec<Entry>, base: &Path, comps: &[&str], status: ChangeStatus) {
     let Some((first, rest)) = comps.split_first() else {
         return;
     };
@@ -463,6 +501,7 @@ fn insert_path(children: &mut Vec<Entry>, base: &Path, comps: &[&str]) {
                 name: (*first).to_string(),
                 path: path.clone(),
                 is_dir: !is_file,
+                status,
                 expanded: true,
                 children: Vec::new(),
             });
@@ -470,7 +509,7 @@ fn insert_path(children: &mut Vec<Entry>, base: &Path, comps: &[&str]) {
         }
     };
     if !is_file {
-        insert_path(&mut children[index].children, &path, rest);
+        insert_path(&mut children[index].children, &path, rest, status);
     }
 }
 
@@ -497,7 +536,13 @@ fn sort_entries(entries: &mut Vec<Entry>) {
     }
 }
 
-fn push_entry_rows(rows: &mut Vec<Row>, entry: &Entry, depth: usize, status: ChangeStatus) {
+fn push_entry_rows(
+    rows: &mut Vec<Row>,
+    entry: &Entry,
+    depth: usize,
+    group_status: ChangeStatus,
+    staged: bool,
+) {
     rows.push(Row {
         depth,
         label: entry.name.clone(),
@@ -506,15 +551,43 @@ fn push_entry_rows(rows: &mut Vec<Row>, entry: &Entry, depth: usize, status: Cha
         } else {
             RowKind::File
         },
-        status,
+        status: if entry.is_dir {
+            group_status
+        } else {
+            entry.status
+        },
+        staged,
         path: entry.path.clone(),
         expanded: entry.expanded,
     });
     if entry.is_dir && entry.expanded {
         for child in &entry.children {
-            push_entry_rows(rows, child, depth + 1, status);
+            push_entry_rows(rows, child, depth + 1, group_status, staged);
         }
     }
+}
+
+fn categorize(changes: Vec<FileChange>) -> [Vec<PathBuf>; 3] {
+    let mut added = Vec::new();
+    let mut modified = Vec::new();
+    let mut deleted = Vec::new();
+    for change in changes {
+        let (status, path) = match change {
+            FileChange::Untracked { path } => (ChangeStatus::Added, path),
+            FileChange::Modified { path } | FileChange::Conflict { path } => {
+                (ChangeStatus::Modified, path)
+            }
+            FileChange::Renamed { to_path, .. } => (ChangeStatus::Modified, to_path),
+            FileChange::Deleted { path } => (ChangeStatus::Deleted, path),
+        };
+        let path = helix_stdx::path::canonicalize(path);
+        match status {
+            ChangeStatus::Added => added.push(path),
+            ChangeStatus::Modified => modified.push(path),
+            ChangeStatus::Deleted => deleted.push(path),
+        }
+    }
+    [added, modified, deleted]
 }
 
 fn find_entry_mut<'a>(entries: &'a mut [Entry], path: &Path) -> Option<&'a mut Entry> {

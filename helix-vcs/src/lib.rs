@@ -18,7 +18,7 @@ pub use diff::{DiffHandle, Hunk};
 
 mod status;
 
-pub use status::FileChange;
+pub use status::{FileChange, WorkingTreeStatus};
 
 /// Contains all active diff providers. Diff providers are compiled in via features. Currently
 /// only `git` is supported.
@@ -79,6 +79,13 @@ impl DiffProviderRegistry {
         } else {
             bail!("no diff provider returns success")
         }
+    }
+
+    pub fn working_tree_status(&self, cwd: &Path, trust_full: bool) -> Result<WorkingTreeStatus> {
+        self.providers
+            .iter()
+            .find_map(|provider| provider.working_tree_status(cwd, trust_full).ok())
+            .ok_or_else(|| anyhow!("no diff provider returns success"))
     }
 
     /// Fire-and-forget changed file iteration. Runs everything in a background task. Keeps
@@ -156,6 +163,14 @@ impl DiffProvider {
         match self {
             #[cfg(feature = "git")]
             Self::Git => git::for_each_changed_file(cwd, trust_full, f),
+            Self::None => bail!("No diff support compiled in"),
+        }
+    }
+
+    fn working_tree_status(&self, cwd: &Path, trust_full: bool) -> Result<WorkingTreeStatus> {
+        match self {
+            #[cfg(feature = "git")]
+            Self::Git => git::working_tree_status(cwd, trust_full),
             Self::None => bail!("No diff support compiled in"),
         }
     }
