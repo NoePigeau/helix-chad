@@ -29,9 +29,10 @@ Everything else (editing model, language support, configuration) is standard Hel
 > **Note:** the folder icons require a [Nerd Font](https://www.nerdfonts.com/) in your terminal. Without one, the icons show up as tofu (□).
 
 **Git changes** — list of changed files (Zed style).
-- Grouped into Added / Modified / Deleted, with counts.
+- A `Staged` group plus Added / Modified / Deleted groups for the unstaged changes, with counts.
 - Single-child folder chains are collapsed into one line (`src/routes/api.export`).
 - Enter opens the file in the editor.
+- Stage / unstage (`s`) and discard (`d`) a change directly from the sidebar.
 
 
 <img src="./contrib/sidebar-git-change.png" alt="Git changes" width="700">

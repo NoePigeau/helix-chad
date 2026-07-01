@@ -1,8 +1,11 @@
+use std::io;
 use std::path::{Path, PathBuf, MAIN_SEPARATOR};
+use std::process::{Command, ExitStatus};
 use std::time::Duration;
 
 use helix_vcs::FileChange;
 use helix_view::{
+    current,
     editor::Action,
     graphics::{Color, Modifier, Rect, Style},
     input::KeyEvent,
@@ -12,9 +15,9 @@ use helix_view::{
 
 use tui::buffer::Buffer as Surface;
 
-use crate::compositor::{Callback, EventResult};
+use crate::compositor::{Callback, Compositor, Context, EventResult};
 use crate::job::{self, Job, Jobs};
-use crate::ui::icons;
+use crate::ui::{completers, icons, EditorView, Prompt, PromptEvent};
 
 const GOTO_CHANGE_RETRY_DELAY: Duration = Duration::from_millis(16);
 const GOTO_CHANGE_MAX_ATTEMPTS: usize = 60;
@@ -385,6 +388,29 @@ impl ChangesSidebar {
                     }
                 }
             }
+            KeyCode::Char('s') => {
+                if let Some(row) = self.rows.get(self.selected) {
+                    if let RowKind::File = row.kind {
+                        return EventResult::Consumed(Some(Self::toggle_stage_prompt(
+                            self.root.clone(),
+                            row.path.clone(),
+                            row.staged,
+                        )));
+                    }
+                }
+            }
+            KeyCode::Char('d') => {
+                if let Some(row) = self.rows.get(self.selected) {
+                    if let RowKind::File = row.kind {
+                        return EventResult::Consumed(Some(Self::discard_prompt(
+                            self.root.clone(),
+                            row.path.clone(),
+                            row.status,
+                            row.staged,
+                        )));
+                    }
+                }
+            }
             KeyCode::Char('R') => self.refresh(editor),
             KeyCode::Char('q') | KeyCode::Esc => self.unfocus(),
             _ => {}
@@ -486,6 +512,144 @@ impl ChangesSidebar {
             }
         }
     }
+
+    fn toggle_stage_prompt(root: PathBuf, path: PathBuf, staged: bool) -> Callback {
+        Box::new(move |compositor: &mut Compositor, cx: &mut Context| {
+            let prefill = path.to_string_lossy().into_owned();
+            let prefix = if staged { "unstage:" } else { "stage:" };
+
+            let prompt = Prompt::new(
+                prefix.into(),
+                None,
+                completers::filename,
+                move |cx: &mut Context, input: &str, event: PromptEvent| {
+                    if event != PromptEvent::Validate {
+                        return;
+                    }
+                    let input = input.trim();
+                    if input.is_empty() {
+                        return;
+                    }
+
+                    let path = PathBuf::from(input);
+                    let args: &[&str] = if staged {
+                        &["restore", "--staged"]
+                    } else {
+                        &["add"]
+                    };
+                    match run_git(&root, args, &path) {
+                        Ok(status) if status.success() => schedule_post_git(None),
+                        Ok(_) | Err(_) => cx
+                            .editor
+                            .set_error(format!("git failed on {}", path.display())),
+                    }
+                },
+            )
+            .with_line(prefill, cx.editor);
+
+            compositor.push(Box::new(prompt));
+        })
+    }
+
+    fn discard_prompt(
+        root: PathBuf,
+        path: PathBuf,
+        status: ChangeStatus,
+        staged: bool,
+    ) -> Callback {
+        Box::new(move |compositor: &mut Compositor, cx: &mut Context| {
+            let prefill = path.to_string_lossy().into_owned();
+
+            let prompt = Prompt::new(
+                "discard:".into(),
+                None,
+                completers::filename,
+                move |cx: &mut Context, input: &str, event: PromptEvent| {
+                    if event != PromptEvent::Validate {
+                        return;
+                    }
+                    let input = input.trim();
+                    if input.is_empty() {
+                        return;
+                    }
+
+                    let path = PathBuf::from(input);
+                    match discard(&root, &path, status, staged) {
+                        Ok(()) => schedule_post_git(Some(path)),
+                        Err(_) => cx
+                            .editor
+                            .set_error(format!("Could not discard {}", path.display())),
+                    }
+                },
+            )
+            .with_line(prefill, cx.editor);
+
+            compositor.push(Box::new(prompt));
+        })
+    }
+}
+
+fn run_git(root: &Path, args: &[&str], path: &Path) -> io::Result<ExitStatus> {
+    Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .arg("--")
+        .arg(path)
+        .status()
+}
+
+fn discard(root: &Path, path: &Path, status: ChangeStatus, staged: bool) -> io::Result<()> {
+    let check = |status: ExitStatus| {
+        if status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::new(io::ErrorKind::Other, "git command failed"))
+        }
+    };
+
+    if staged {
+        check(run_git(root, &["restore", "--staged"], path)?)?;
+    }
+
+    match status {
+        ChangeStatus::Added => {
+            if path.exists() {
+                std::fs::remove_file(path)?;
+            }
+        }
+        ChangeStatus::Modified | ChangeStatus::Deleted => {
+            check(run_git(root, &["restore"], path)?)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn schedule_post_git(reload_path: Option<PathBuf>) {
+    use helix_loader::workspace_trust::TrustQuery;
+
+    job::dispatch_blocking(move |editor, compositor| {
+        if let Some(reload_path) = &reload_path {
+            let reload_path = helix_stdx::path::canonicalize(reload_path);
+            let scrolloff = editor.config().scrolloff;
+            let (view, doc) = current!(editor);
+            if doc.path().map(helix_stdx::path::canonicalize) == Some(reload_path) {
+                let trust_full = editor
+                    .workspace_trust
+                    .query(doc.workspace_root(), TrustQuery::Git)
+                    .is_trusted();
+                if doc.reload(view, &editor.diff_providers, trust_full).is_ok() {
+                    view.ensure_cursor_in_view(doc, scrolloff);
+                }
+            }
+        }
+
+        if let Some(editor_view) = compositor.find::<EditorView>() {
+            editor_view.changes.refresh_if_open(editor);
+            editor_view.explorer.refresh_if_open(editor);
+        }
+    });
 }
 
 fn insert_path(children: &mut Vec<Entry>, base: &Path, comps: &[&str], status: ChangeStatus) {
