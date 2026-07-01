@@ -2565,6 +2565,10 @@ fn make_search_word_bounded(cx: &mut Context) {
 }
 
 fn global_search(cx: &mut Context) {
+    global_search_in_directory(cx, helix_stdx::env::current_working_dir());
+}
+
+pub fn global_search_in_directory(cx: &mut Context, search_root: PathBuf) {
     #[derive(Debug)]
     struct FileResult<'a> {
         path: Cow<'a, Path>,
@@ -2588,6 +2592,7 @@ fn global_search(cx: &mut Context) {
         smart_case: bool,
         file_picker_config: helix_view::editor::FilePickerConfig,
         style: PathStyleConfig,
+        search_root: PathBuf,
     }
 
     let config = cx.editor.config();
@@ -2595,6 +2600,7 @@ fn global_search(cx: &mut Context) {
         smart_case: config.search.smart_case,
         file_picker_config: config.file_picker.clone(),
         style: PathStyleConfig::new(&cx.editor.theme),
+        search_root,
     };
 
     let columns = [
@@ -2614,10 +2620,9 @@ fn global_search(cx: &mut Context) {
             return async { Ok(()) }.boxed();
         }
 
-        let search_root = helix_stdx::env::current_working_dir();
+        let search_root = config.search_root.clone();
         if !search_root.exists() {
-            return async { Err(anyhow::anyhow!("Current working directory does not exist")) }
-                .boxed();
+            return async { Err(anyhow::anyhow!("Search directory does not exist")) }.boxed();
         }
 
         let documents: Vec<_> = editor

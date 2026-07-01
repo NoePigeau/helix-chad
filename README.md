@@ -22,6 +22,7 @@ Everything else (editing model, language support, configuration) is standard Hel
 - Nerd Font folder icons instead of expand triangles.
 - Git status colors per file, propagated up to parent folders (VSCode style).
 - Create (`a`), rename (`r`), delete (`d`) files from the sidebar.
+- Search (`/`) scoped to the selected folder (recursively) or file, like `Space /` but narrowed.
 
 
 <img src="./contrib/sidebar-explorer.png" alt="File explorer" width="700">

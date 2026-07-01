@@ -432,6 +432,13 @@ impl ExplorerSidebar {
                     return EventResult::Consumed(Some(Self::delete_prompt(source)));
                 }
             }
+            KeyCode::Char('/') => {
+                let search_root = match self.nodes.get(self.selected) {
+                    Some(node) => node.path.clone(),
+                    None => self.root.clone(),
+                };
+                return EventResult::Consumed(Some(Self::global_search_callback(search_root)));
+            }
             KeyCode::Char('W') => self.collapse_all(),
             KeyCode::Char('q') | KeyCode::Esc => self.unfocus(),
             _ => {}
@@ -452,6 +459,26 @@ impl ExplorerSidebar {
                 editor_view.explorer.reload_and_reveal(&path, editor);
             }
         });
+    }
+
+    fn global_search_callback(search_root: PathBuf) -> Callback {
+        Box::new(move |compositor: &mut Compositor, cx: &mut Context| {
+            let mut ctx = crate::commands::Context {
+                register: None,
+                count: None,
+                editor: cx.editor,
+                callback: Vec::new(),
+                on_next_key_callback: None,
+                jobs: cx.jobs,
+            };
+            crate::commands::global_search_in_directory(&mut ctx, search_root);
+
+            let callbacks = std::mem::take(&mut ctx.callback);
+            drop(ctx);
+            for callback in callbacks {
+                callback(compositor, cx);
+            }
+        })
     }
 
     fn create_prompt(target_dir: PathBuf) -> Callback {
