@@ -689,6 +689,22 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         }
     }
 
+    fn render_title(&self, area: Rect, surface: &mut Surface, cx: &Context) {
+        if self.title.is_empty() {
+            return;
+        }
+
+        let title = format!(" {} ", self.title);
+        let title_width = title.width() as u16;
+        if title_width >= area.width {
+            return;
+        }
+
+        let title_style = cx.editor.theme.get("ui.text").add_modifier(Modifier::BOLD);
+        let title_x = area.x + (area.width - title_width) / 2;
+        surface.set_string(title_x, area.y, &title, title_style);
+    }
+
     fn render_picker(&mut self, area: Rect, surface: &mut Surface, cx: &mut Context) {
         let status = self.matcher.tick(10);
         let snapshot = self.matcher.snapshot();
@@ -714,16 +730,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
 
         BLOCK.render(area, surface);
 
-        // -- Render the title centered on the top border:
-        if !self.title.is_empty() {
-            let title_style = cx.editor.theme.get("ui.text").add_modifier(Modifier::BOLD);
-            let title = format!(" {} ", self.title);
-            let title_width = title.width() as u16;
-            if title_width < area.width {
-                let title_x = area.x + area.width.saturating_sub(title_width) / 2;
-                surface.set_string(title_x, area.y, &title, title_style);
-            }
-        }
+        self.render_title(area, surface, cx);
 
         // -- Render the input bar:
 

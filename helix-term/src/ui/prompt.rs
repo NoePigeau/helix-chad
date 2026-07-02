@@ -17,8 +17,8 @@ use helix_core::{
     Position,
 };
 use helix_view::{
-    graphics::{Color, CursorKind, Margin, Modifier, Rect},
-    Editor,
+    graphics::{Color, CursorKind, Margin, Modifier, Rect, Style},
+    Editor, Theme,
 };
 
 type PromptCharHandler = Box<dyn Fn(&mut Prompt, char, &Context)>;
@@ -48,6 +48,9 @@ pub struct Prompt {
     next_char_handler: Option<PromptCharHandler>,
     language: Option<(&'static str, Arc<ArcSwap<syntax::Loader>>)>,
     search_bar: bool,
+    box_title: Cow<'static, str>,
+    box_icon: &'static str,
+    boxed_completions: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -105,6 +108,9 @@ impl Prompt {
             next_char_handler: None,
             language: None,
             search_bar: false,
+            box_title: Cow::Borrowed("Search"),
+            box_icon: "\u{f002}  ",
+            boxed_completions: false,
         }
     }
 
@@ -137,6 +143,14 @@ impl Prompt {
 
     pub fn as_search_bar(mut self) -> Self {
         self.search_bar = true;
+        self
+    }
+
+    pub fn as_command_line(mut self) -> Self {
+        self.search_bar = true;
+        self.boxed_completions = true;
+        self.box_title = Cow::Borrowed("Cmdline");
+        self.box_icon = ">_  ";
         self
     }
 
@@ -407,6 +421,55 @@ impl Prompt {
 
 const BASE_WIDTH: u16 = 30;
 
+const FLOATING_BOX_MIN_WIDTH: u16 = 30;
+const FLOATING_BOX_MAX_WIDTH: u16 = 120;
+const FLOATING_BOX_MIN_RENDER_WIDTH: u16 = 12;
+const INPUT_BOX_HEIGHT: u16 = 3;
+const COMPLETION_MAX_ROWS: u16 = 10;
+
+#[derive(Clone, Copy)]
+struct BoxStyle {
+    border: Style,
+    background: Style,
+}
+
+impl BoxStyle {
+    fn from_theme(theme: &Theme) -> Self {
+        let background = theme.get("ui.background");
+        let border_color = theme
+            .try_get("ui.popup.border")
+            .or_else(|| theme.try_get("ui.window"))
+            .and_then(|style| style.fg)
+            .unwrap_or(Color::Gray);
+
+        Self {
+            border: background.fg(border_color),
+            background,
+        }
+    }
+}
+
+fn rounded_block(style: BoxStyle) -> Block<'static> {
+    Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(style.border)
+        .style(style.background)
+}
+
+fn centered_floating_box(area: Rect, height: u16) -> Rect {
+    let width = (area.width * 3 / 5)
+        .clamp(FLOATING_BOX_MIN_WIDTH, FLOATING_BOX_MAX_WIDTH)
+        .min(area.width.saturating_sub(2));
+
+    Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height / 4,
+        width,
+        height,
+    )
+    .intersection(area)
+}
+
 impl Prompt {
     pub fn render_prompt(&mut self, area: Rect, surface: &mut Surface, cx: &mut Context) {
         if self.search_bar {
@@ -620,50 +683,40 @@ impl Prompt {
     }
 
     fn render_search_bar(&mut self, area: Rect, surface: &mut Surface, cx: &mut Context) {
-        let theme = &cx.editor.theme;
-        let background = theme.get("ui.background");
-        let line_color = theme
-            .try_get("ui.popup.border")
-            .or_else(|| theme.try_get("ui.window"))
-            .and_then(|style| style.fg)
-            .unwrap_or(Color::Gray);
-        let line_style = background.fg(line_color);
-        let title_style = line_style.add_modifier(Modifier::BOLD);
-        let icon_style = theme.get("ui.text.inactive");
+        let style = BoxStyle::from_theme(&cx.editor.theme);
 
-        let width = (area.width * 3 / 5)
-            .clamp(30, 120)
-            .min(area.width.saturating_sub(2));
-        let box_area = Rect::new(
-            area.x + area.width.saturating_sub(width) / 2,
-            area.y + area.height / 4,
-            width,
-            3,
-        )
-        .intersection(area);
-
-        if box_area.width < 12 || box_area.height < 3 {
+        let input_box = centered_floating_box(area, INPUT_BOX_HEIGHT);
+        if input_box.width < FLOATING_BOX_MIN_RENDER_WIDTH || input_box.height < INPUT_BOX_HEIGHT {
             return;
         }
 
-        surface.clear_with(box_area, background);
+        self.render_input_box(input_box, style, surface, cx);
 
-        let block = Block::bordered()
-            .border_type(BorderType::Rounded)
-            .border_style(line_style)
-            .style(background);
+        if self.boxed_completions {
+            let below_completions = self.render_completion_popup(area, input_box, style, surface, cx);
+            self.render_doc_popup(area, input_box, below_completions, style, surface, cx);
+        }
+    }
+
+    fn render_input_box(
+        &mut self,
+        box_area: Rect,
+        style: BoxStyle,
+        surface: &mut Surface,
+        cx: &mut Context,
+    ) {
+        surface.clear_with(box_area, style.background);
+
+        let block = rounded_block(style);
         let inner = block.inner(box_area);
         block.render(box_area, surface);
 
-        let title = " Search ";
-        let title_width = title.width() as u16;
-        let title_x = box_area.x + box_area.width.saturating_sub(title_width) / 2;
-        surface.set_string(title_x, box_area.y, title, title_style);
+        self.render_box_title(box_area, style, surface);
 
-        let icon = "\u{f002}  ";
-        surface.set_string(inner.x + 1, inner.y, icon, icon_style);
+        let icon_style = cx.editor.theme.get("ui.text.inactive");
+        surface.set_string(inner.x + 1, inner.y, self.box_icon, icon_style);
 
-        let prefix_width = 1 + icon.width() as u16;
+        let prefix_width = 1 + self.box_icon.width() as u16;
         self.line_area = Rect::new(
             inner.x + prefix_width,
             inner.y,
@@ -671,6 +724,126 @@ impl Prompt {
             1,
         );
         self.render_input_line(surface, cx);
+    }
+
+    fn render_box_title(&self, box_area: Rect, style: BoxStyle, surface: &mut Surface) {
+        let title = format!(" {} ", self.box_title);
+        let title_x = box_area.x + box_area.width.saturating_sub(title.width() as u16) / 2;
+        let title_style = style.border.add_modifier(Modifier::BOLD);
+        surface.set_string(title_x, box_area.y, &title, title_style);
+    }
+
+    fn render_completion_popup(
+        &self,
+        area: Rect,
+        input_box: Rect,
+        style: BoxStyle,
+        surface: &mut Surface,
+        cx: &Context,
+    ) -> u16 {
+        let top = input_box.bottom() + 1;
+        if self.completion.is_empty() {
+            return top;
+        }
+
+        let available_rows = area.bottom().saturating_sub(top).saturating_sub(2);
+        let rows = (self.completion.len() as u16)
+            .min(COMPLETION_MAX_ROWS)
+            .min(available_rows);
+        if rows == 0 {
+            return top;
+        }
+
+        let popup = Rect::new(input_box.x, top, input_box.width, rows + 2).intersection(area);
+        surface.clear_with(popup, style.background);
+
+        let block = rounded_block(style);
+        let inner = block.inner(popup);
+        block.render(popup, surface);
+
+        self.render_completion_list(inner, surface, &cx.editor.theme);
+
+        popup.bottom() + 1
+    }
+
+    fn render_completion_list(&self, inner: Rect, surface: &mut Surface, theme: &Theme) {
+        let text_style = theme.get("ui.text");
+        let selected_style = theme.get("ui.menu.selected");
+
+        let visible = inner.height as usize;
+        let selected = self.selection.unwrap_or(0);
+        let offset = selected / visible * visible;
+
+        for (index, (_range, completion)) in
+            self.completion.iter().enumerate().skip(offset).take(visible)
+        {
+            let row = inner.y + (index - offset) as u16;
+            let is_selected = Some(index) == self.selection;
+            let style = if is_selected {
+                surface.set_style(Rect::new(inner.x, row, inner.width, 1), selected_style);
+                selected_style
+            } else {
+                text_style.patch(completion.style)
+            };
+            surface.set_stringn(
+                inner.x + 1,
+                row,
+                &completion.content,
+                inner.width.saturating_sub(1) as usize,
+                style,
+            );
+        }
+
+        let arrow_style = text_style.patch(theme.get("ui.text.inactive"));
+        self.render_scroll_arrows(inner, offset, visible, arrow_style, surface);
+    }
+
+    fn render_scroll_arrows(
+        &self,
+        inner: Rect,
+        offset: usize,
+        visible: usize,
+        style: Style,
+        surface: &mut Surface,
+    ) {
+        let x = inner.right().saturating_sub(1);
+        if offset > 0 {
+            surface.set_string(x, inner.y, "\u{2191}", style);
+        }
+        if offset + visible < self.completion.len() {
+            surface.set_string(x, inner.bottom().saturating_sub(1), "\u{2193}", style);
+        }
+    }
+
+    fn render_doc_popup(
+        &self,
+        area: Rect,
+        input_box: Rect,
+        top: u16,
+        style: BoxStyle,
+        surface: &mut Surface,
+        cx: &mut Context,
+    ) {
+        let Some(doc) = (self.doc_fn)(&self.line) else {
+            return;
+        };
+
+        let mut text = ui::Text::new(doc.to_string());
+        let content_width = input_box.width.saturating_sub(4);
+        let (_, content_height) = ui::text::required_size(&text.contents, content_width);
+        let available_rows = area.bottom().saturating_sub(top).saturating_sub(2);
+        let rows = content_height.min(available_rows);
+        if rows == 0 {
+            return;
+        }
+
+        let popup = Rect::new(input_box.x, top, input_box.width, rows + 2).intersection(area);
+        surface.clear_with(popup, style.background);
+
+        let block = rounded_block(style);
+        let inner = block.inner(popup).inner(Margin::horizontal(1));
+        block.render(popup, surface);
+        text.render(inner, surface, cx);
     }
 }
 
