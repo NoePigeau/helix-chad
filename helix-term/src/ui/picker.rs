@@ -42,7 +42,8 @@ use std::{
 use crate::ui::{Prompt, PromptEvent};
 use helix_core::{
     char_idx_at_visual_offset, fuzzy::MATCHER, movement::Direction,
-    text_annotations::TextAnnotations, unicode::segmentation::UnicodeSegmentation, Position,
+    text_annotations::TextAnnotations, unicode::segmentation::UnicodeSegmentation,
+    unicode::width::UnicodeWidthStr, Position,
 };
 use helix_view::{
     editor::Action,
@@ -251,6 +252,8 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     cursor: u32,
     prompt: Prompt,
     query: PickerQuery,
+    /// Title rendered centered on the top border.
+    title: Cow<'static, str>,
 
     /// Whether to show the preview panel (default true)
     show_preview: bool,
@@ -383,6 +386,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             cursor: 0,
             prompt,
             query,
+            title: Cow::Borrowed("Search"),
             truncate_start: true,
             show_preview: true,
             callback_fn: Box::new(callback_fn),
@@ -410,6 +414,11 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
 
     pub fn truncate_start(mut self, truncate_start: bool) -> Self {
         self.truncate_start = truncate_start;
+        self
+    }
+
+    pub fn with_title(mut self, title: impl Into<Cow<'static, str>>) -> Self {
+        self.title = title.into();
         self
     }
 
@@ -698,12 +707,23 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         let background = cx.editor.theme.get("ui.background");
         surface.clear_with(area, background);
 
-        const BLOCK: Block<'_> = Block::bordered();
+        const BLOCK: Block<'_> = Block::bordered().border_type(BorderType::Rounded);
 
         // calculate the inner area inside the box
         let inner = BLOCK.inner(area);
 
         BLOCK.render(area, surface);
+
+        // -- Render the title centered on the top border:
+        if !self.title.is_empty() {
+            let title_style = cx.editor.theme.get("ui.text").add_modifier(Modifier::BOLD);
+            let title = format!(" {} ", self.title);
+            let title_width = title.width() as u16;
+            if title_width < area.width {
+                let title_x = area.x + area.width.saturating_sub(title_width) / 2;
+                surface.set_string(title_x, area.y, &title, title_style);
+            }
+        }
 
         // -- Render the input bar:
 
@@ -887,7 +907,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         let directory = cx.editor.theme.get("ui.text.directory");
         surface.clear_with(area, background);
 
-        const BLOCK: Block<'_> = Block::bordered();
+        const BLOCK: Block<'_> = Block::bordered().border_type(BorderType::Rounded);
 
         // calculate the inner area inside the box
         let inner = BLOCK.inner(area);

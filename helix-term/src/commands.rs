@@ -2595,6 +2595,15 @@ pub fn global_search_in_directory(cx: &mut Context, search_root: PathBuf) {
         search_root: PathBuf,
     }
 
+    let title: Cow<'static, str> = if search_root == helix_stdx::env::current_working_dir() {
+        Cow::Borrowed("Global Search")
+    } else {
+        Cow::Owned(format!(
+            "Search in {}",
+            helix_stdx::path::get_relative_path(search_root.clone()).display()
+        ))
+    };
+
     let config = cx.editor.config();
     let config = GlobalSearchConfig {
         smart_case: config.search.smart_case,
@@ -2792,7 +2801,8 @@ pub fn global_search_in_directory(cx: &mut Context, search_root: PathBuf) {
          }| { Some((path.as_ref().into(), Some((*line_start, *line_end)))) },
     )
     .with_history_register(Some(reg))
-    .with_dynamic_query(get_files, Some(275));
+    .with_dynamic_query(get_files, Some(275))
+    .with_title(title);
 
     cx.push_layer(Box::new(overlaid(picker)));
 }
