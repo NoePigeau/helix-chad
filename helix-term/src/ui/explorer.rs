@@ -158,7 +158,10 @@ impl ExplorerSidebar {
 
         let trust_full = editor
             .workspace_trust
-            .query(&helix_loader::find_workspace_in(&self.root).0, TrustQuery::Git)
+            .query(
+                &helix_loader::find_workspace_in(&self.root).0,
+                TrustQuery::Git,
+            )
             .is_trusted();
 
         let Ok(changes) = editor.diff_providers.changed_files(&self.root, trust_full) else {
@@ -505,9 +508,11 @@ impl ExplorerSidebar {
                     let path = PathBuf::from(input);
                     match cx.editor.create_path(&path, is_dir) {
                         Ok(()) => Self::schedule_reveal(helix_stdx::path::canonicalize(&path)),
-                        Err(err) => cx
-                            .editor
-                            .set_error(format!("Could not create {}: {}", path.display(), err)),
+                        Err(err) => cx.editor.set_error(format!(
+                            "Could not create {}: {}",
+                            path.display(),
+                            err
+                        )),
                     }
                 },
             )
@@ -543,9 +548,11 @@ impl ExplorerSidebar {
                                 .unwrap_or(&path);
                             Self::schedule_reveal(helix_stdx::path::canonicalize(reveal));
                         }
-                        Err(err) => cx
-                            .editor
-                            .set_error(format!("Could not delete {}: {}", path.display(), err)),
+                        Err(err) => cx.editor.set_error(format!(
+                            "Could not delete {}: {}",
+                            path.display(),
+                            err
+                        )),
                     }
                 },
             )
@@ -604,7 +611,9 @@ impl ExplorerSidebar {
         let text_style = theme.get("ui.text");
         let dir_style = theme.get("ui.text.focus");
         let ignored_fg = Color::Rgb(0x9a, 0xa5, 0xb1);
-        let ignored_style = Style::default().fg(ignored_fg).add_modifier(Modifier::ITALIC);
+        let ignored_style = Style::default()
+            .fg(ignored_fg)
+            .add_modifier(Modifier::ITALIC);
         let selected_style = if self.focused {
             theme.get("ui.menu.selected")
         } else {
@@ -633,13 +642,7 @@ impl ExplorerSidebar {
             self.scroll = self.selected - height + 1;
         }
 
-        for (row, node) in self
-            .nodes
-            .iter()
-            .enumerate()
-            .skip(self.scroll)
-            .take(height)
-        {
+        for (row, node) in self.nodes.iter().enumerate().skip(self.scroll).take(height) {
             let y = inner.y + (row - self.scroll) as u16;
 
             let indent = "  ".repeat(node.depth);
@@ -693,7 +696,8 @@ impl ExplorerSidebar {
                 Style::default().fg(icon_color.unwrap_or(Color::Reset))
             };
             let glyph = format!("{} ", icon);
-            let (x, _) = surface.set_stringn(x, y, &glyph, end.saturating_sub(x) as usize, icon_style);
+            let (x, _) =
+                surface.set_stringn(x, y, &glyph, end.saturating_sub(x) as usize, icon_style);
             let (x, _) = surface.set_stringn(x, y, &name, end.saturating_sub(x) as usize, style);
 
             let is_modified = !node.is_dir

@@ -179,7 +179,10 @@ impl ChangesSidebar {
 
         let trust_full = editor
             .workspace_trust
-            .query(&helix_loader::find_workspace_in(&self.root).0, TrustQuery::Git)
+            .query(
+                &helix_loader::find_workspace_in(&self.root).0,
+                TrustQuery::Git,
+            )
             .is_trusted();
 
         let status = editor
@@ -348,14 +351,17 @@ impl ChangesSidebar {
             RowKind::File => {
                 let path = row.path.clone();
                 self.unfocus();
-                let callback: Callback = Box::new(move |_compositor, cx| {
-                    match cx.editor.open(&path, Action::Replace) {
-                        Ok(doc_id) => schedule_goto_first_change(cx.jobs, doc_id),
-                        Err(err) => cx
-                            .editor
-                            .set_error(format!("Failed to open {}: {}", path.display(), err)),
-                    }
-                });
+                let callback: Callback =
+                    Box::new(
+                        move |_compositor, cx| match cx.editor.open(&path, Action::Replace) {
+                            Ok(doc_id) => schedule_goto_first_change(cx.jobs, doc_id),
+                            Err(err) => cx.editor.set_error(format!(
+                                "Failed to open {}: {}",
+                                path.display(),
+                                err
+                            )),
+                        },
+                    );
                 EventResult::Consumed(Some(callback))
             }
         }
@@ -460,7 +466,13 @@ impl ChangesSidebar {
         let height = inner.height as usize;
 
         if self.rows.is_empty() {
-            surface.set_stringn(inner.x, inner.y, "No changes", inner.width as usize, text_style);
+            surface.set_stringn(
+                inner.x,
+                inner.y,
+                "No changes",
+                inner.width as usize,
+                text_style,
+            );
             return;
         }
 
@@ -493,7 +505,11 @@ impl ChangesSidebar {
             }
 
             if let RowKind::Group = row.kind {
-                let marker = if row.expanded { "\u{25be} " } else { "\u{25b8} " };
+                let marker = if row.expanded {
+                    "\u{25be} "
+                } else {
+                    "\u{25b8} "
+                };
                 let line = format!("{}{}{}", indent, marker, row.label);
                 surface.set_stringn(inner.x, y, &line, inner.width as usize, style);
             } else {
@@ -506,8 +522,13 @@ impl ChangesSidebar {
                     icons::file_icon(Path::new(&row.label))
                 };
                 let glyph = format!("{} ", icon);
-                let (x, _) =
-                    surface.set_stringn(x, y, &glyph, end.saturating_sub(x) as usize, Style::default().fg(color));
+                let (x, _) = surface.set_stringn(
+                    x,
+                    y,
+                    &glyph,
+                    end.saturating_sub(x) as usize,
+                    Style::default().fg(color),
+                );
                 surface.set_stringn(x, y, &row.label, end.saturating_sub(x) as usize, style);
             }
         }

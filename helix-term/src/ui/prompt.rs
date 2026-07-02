@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::{borrow::Cow, ops::RangeFrom};
 use tui::buffer::Buffer as Surface;
 use tui::text::Span;
-use tui::widgets::{Block, Widget};
+use tui::widgets::{Block, BorderType, Widget};
 
 use helix_core::{
     unicode::segmentation::{GraphemeCursor, UnicodeSegmentation},
@@ -17,7 +17,7 @@ use helix_core::{
     Position,
 };
 use helix_view::{
-    graphics::{CursorKind, Margin, Rect},
+    graphics::{Color, CursorKind, Margin, Modifier, Rect},
     Editor,
 };
 
@@ -47,6 +47,7 @@ pub struct Prompt {
     pub doc_fn: DocFn,
     next_char_handler: Option<PromptCharHandler>,
     language: Option<(&'static str, Arc<ArcSwap<syntax::Loader>>)>,
+    search_bar: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -103,6 +104,7 @@ impl Prompt {
             doc_fn: Box::new(|_| None),
             next_char_handler: None,
             language: None,
+            search_bar: false,
         }
     }
 
@@ -130,6 +132,11 @@ impl Prompt {
         loader: Arc<ArcSwap<syntax::Loader>>,
     ) -> Self {
         self.language = Some((language, loader));
+        self
+    }
+
+    pub fn as_search_bar(mut self) -> Self {
+        self.search_bar = true;
         self
     }
 
@@ -402,11 +409,15 @@ const BASE_WIDTH: u16 = 30;
 
 impl Prompt {
     pub fn render_prompt(&mut self, area: Rect, surface: &mut Surface, cx: &mut Context) {
+        if self.search_bar {
+            self.render_search_bar(area, surface, cx);
+            return;
+        }
+
         let theme = &cx.editor.theme;
         let prompt_color = theme.get("ui.text");
         let completion_color = theme.get("ui.menu");
         let selected_color = theme.get("ui.menu.selected");
-        let suggestion_color = theme.get("ui.text.inactive");
         let background = theme.get("ui.background");
         // completion
 
@@ -520,6 +531,13 @@ impl Prompt {
             .clip_top(line)
             .clip_right(2);
 
+        self.render_input_line(surface, cx);
+    }
+
+    fn render_input_line(&mut self, surface: &mut Surface, cx: &mut Context) {
+        let prompt_color = cx.editor.theme.get("ui.text");
+        let suggestion_color = cx.editor.theme.get("ui.text.inactive");
+
         if self.line.is_empty() {
             self.anchor = 0;
             // Show the most recently entered value as a suggestion.
@@ -599,6 +617,60 @@ impl Prompt {
                 |_| prompt_color,
             );
         }
+    }
+
+    fn render_search_bar(&mut self, area: Rect, surface: &mut Surface, cx: &mut Context) {
+        let theme = &cx.editor.theme;
+        let background = theme.get("ui.background");
+        let line_color = theme
+            .try_get("ui.popup.border")
+            .or_else(|| theme.try_get("ui.window"))
+            .and_then(|style| style.fg)
+            .unwrap_or(Color::Gray);
+        let line_style = background.fg(line_color);
+        let title_style = line_style.add_modifier(Modifier::BOLD);
+        let icon_style = theme.get("ui.text.inactive");
+
+        let width = (area.width * 3 / 5)
+            .clamp(30, 120)
+            .min(area.width.saturating_sub(2));
+        let box_area = Rect::new(
+            area.x + area.width.saturating_sub(width) / 2,
+            area.y + area.height / 4,
+            width,
+            3,
+        )
+        .intersection(area);
+
+        if box_area.width < 12 || box_area.height < 3 {
+            return;
+        }
+
+        surface.clear_with(box_area, background);
+
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(line_style)
+            .style(background);
+        let inner = block.inner(box_area);
+        block.render(box_area, surface);
+
+        let title = " Search ";
+        let title_width = title.width() as u16;
+        let title_x = box_area.x + box_area.width.saturating_sub(title_width) / 2;
+        surface.set_string(title_x, box_area.y, title, title_style);
+
+        let icon = "\u{f002}  ";
+        surface.set_string(inner.x + 1, inner.y, icon, icon_style);
+
+        let prefix_width = 1 + icon.width() as u16;
+        self.line_area = Rect::new(
+            inner.x + prefix_width,
+            inner.y,
+            inner.width.saturating_sub(prefix_width + 1),
+            1,
+        );
+        self.render_input_line(surface, cx);
     }
 }
 
@@ -770,6 +842,16 @@ impl Component for Prompt {
     }
 
     fn cursor(&self, area: Rect, editor: &Editor) -> (Option<Position>, CursorKind) {
+        let insert_shape = editor.config().cursor_shape.from_mode(Mode::Insert);
+
+        if self.search_bar {
+            let col = self.line_area.x as usize + self.line[self.anchor..self.cursor].width();
+            return (
+                Some(Position::new(self.line_area.y as usize, col)),
+                insert_shape,
+            );
+        }
+
         let area = area
             .clip_left(self.prompt.len() as u16)
             .clip_right(if self.prompt.is_empty() { 2 } else { 0 });
@@ -794,7 +876,7 @@ impl Component for Prompt {
 
         (
             Some(Position::new(area.y as usize + line, col)),
-            editor.config().cursor_shape.from_mode(Mode::Insert),
+            insert_shape,
         )
     }
 }
