@@ -14,6 +14,7 @@ An nvim-tree style tree browser.
 - Git status colors per file, propagated up to parent folders (VSCode style).
 - Ignored files greyed and italic.
 - Create, rename (auto-creates parent dirs) and delete files inline.
+- Copy / paste files and folders, and yank the selected entry name to the clipboard.
 - Scoped search — `Space /` narrowed to the selected folder (recursive) or file.
 - Reveals and expands to the current file when opened.
 
@@ -78,6 +79,8 @@ Inside a sidebar:
 | `l` / `Enter`   | Expand folder or open file               |
 | `h`             | Collapse / go to parent                  |
 | `a` / `r` / `d` | Create / rename / delete (file explorer) |
+| `c` / `p`       | Copy / paste (file explorer)             |
+| `y`             | Yank the entry name (file explorer)      |
 | `s` / `d`       | Stage-unstage / discard (git changes)    |
 | `/`             | Scoped search (file explorer)            |
 | `R`             | Reload                                   |
@@ -93,6 +96,9 @@ The action keys inside each sidebar are configurable from your `config.toml` (de
 create = "a"
 rename = "r"
 delete = "d"
+copy = "c"
+paste = "p"
+yank-name = "y"
 search = "/"
 collapse-all = "W"
 reload = "R"

@@ -458,6 +458,12 @@ pub struct ExplorerKeysConfig {
     pub rename: KeyEvent,
     /// Delete the selected entry. Defaults to `d`.
     pub delete: KeyEvent,
+    /// Copy the selected entry into the explorer clipboard. Defaults to `c`.
+    pub copy: KeyEvent,
+    /// Paste the copied entry into the selected folder. Defaults to `p`.
+    pub paste: KeyEvent,
+    /// Yank the selected entry name to the clipboard. Defaults to `y`.
+    pub yank_name: KeyEvent,
     /// Scoped search within the selected folder or file. Defaults to `/`.
     pub search: KeyEvent,
     /// Collapse all folders. Defaults to `W`.
@@ -472,6 +478,9 @@ impl Default for ExplorerKeysConfig {
             create: char_key('a'),
             rename: char_key('r'),
             delete: char_key('d'),
+            copy: char_key('c'),
+            paste: char_key('p'),
+            yank_name: char_key('y'),
             search: char_key('/'),
             collapse_all: char_key('W'),
             reload: char_key('R'),
@@ -1115,6 +1124,20 @@ impl Default for AutoSaveAfterDelay {
 
 fn default_auto_save_delay() -> u64 {
     DEFAULT_AUTO_SAVE_DELAY
+}
+
+fn copy_dir_recursive(source: &Path, dest: &Path) -> io::Result<()> {
+    fs::create_dir_all(dest)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let target = dest.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
 }
 
 fn deserialize_auto_save<'de, D>(deserializer: D) -> Result<AutoSave, D::Error>
@@ -1844,6 +1867,43 @@ impl Editor {
             ls.did_delete(&path, is_dir);
         }
         self.language_servers.file_event_handler.file_changed(path);
+        Ok(())
+    }
+
+    pub fn copy_path(&mut self, source: &Path, dest: &Path) -> io::Result<()> {
+        let source = canonicalize(source);
+        let dest = canonicalize(dest);
+        if source == dest {
+            return Ok(());
+        }
+
+        let is_dir = source.is_dir();
+        if is_dir && dest.starts_with(&source) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cannot copy a directory into itself",
+            ));
+        }
+
+        if let Some(parent) = dest.parent() {
+            if !parent.is_dir() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
+        if is_dir {
+            copy_dir_recursive(&source, &dest)?;
+        } else {
+            fs::copy(&source, &dest)?;
+        }
+
+        for ls in self.language_servers.iter_clients() {
+            if !ls.is_initialized() {
+                continue;
+            }
+            ls.did_create(&dest, is_dir);
+        }
+        self.language_servers.file_event_handler.file_changed(dest);
         Ok(())
     }
 

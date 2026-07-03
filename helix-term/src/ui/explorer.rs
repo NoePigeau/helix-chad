@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 
 use helix_view::{
@@ -69,6 +70,7 @@ pub struct ExplorerSidebar {
     root: PathBuf,
     nodes: Vec<TreeNode>,
     git_status: HashMap<PathBuf, GitStatus>,
+    clipboard: Option<PathBuf>,
 }
 
 impl ExplorerSidebar {
@@ -346,6 +348,18 @@ impl ExplorerSidebar {
             }
             return EventResult::Consumed(None);
         }
+        if event == keys.copy {
+            self.copy_selection(editor);
+            return EventResult::Consumed(None);
+        }
+        if event == keys.paste {
+            self.paste(editor);
+            return EventResult::Consumed(None);
+        }
+        if event == keys.yank_name {
+            self.yank_name(editor);
+            return EventResult::Consumed(None);
+        }
         if event == keys.search {
             let search_root = match self.nodes.get(self.state.selected) {
                 Some(node) => node.path.clone(),
@@ -411,6 +425,43 @@ impl ExplorerSidebar {
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| self.root.clone()),
             None => self.root.clone(),
+        }
+    }
+
+    fn copy_selection(&mut self, editor: &mut Editor) {
+        let Some(node) = self.nodes.get(self.state.selected) else {
+            return;
+        };
+        let path = node.path.clone();
+        let name = file_name(&path);
+        self.clipboard = Some(path);
+        editor.set_status(format!("Copied '{name}'"));
+    }
+
+    fn paste(&mut self, editor: &mut Editor) {
+        let Some(source) = self.clipboard.clone() else {
+            editor.set_error("Nothing to paste");
+            return;
+        };
+        let Some(name) = source.file_name() else {
+            return;
+        };
+
+        let dest = unique_destination(&self.target_dir(), name);
+        match editor.copy_path(&source, &dest) {
+            Ok(()) => self.reload_and_reveal(&dest, editor),
+            Err(err) => editor.set_error(format!("Could not paste: {err}")),
+        }
+    }
+
+    fn yank_name(&mut self, editor: &mut Editor) {
+        let Some(node) = self.nodes.get(self.state.selected) else {
+            return;
+        };
+        let name = file_name(&node.path);
+        match editor.registers.write('+', vec![name.clone()]) {
+            Ok(()) => editor.set_status(format!("Yanked '{name}'")),
+            Err(err) => editor.set_error(err.to_string()),
         }
     }
 
@@ -733,6 +784,46 @@ fn node_row_style(
         style = style.add_modifier(Modifier::ITALIC);
     }
     style
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+fn unique_destination(dir: &Path, name: &OsStr) -> PathBuf {
+    let base = dir.join(name);
+    if !base.exists() {
+        return base;
+    }
+
+    let name = Path::new(name);
+    let stem = name
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let extension = name
+        .extension()
+        .map(|ext| ext.to_string_lossy().into_owned());
+
+    let mut counter = 1;
+    loop {
+        let suffix = if counter == 1 {
+            format!("{stem} copy")
+        } else {
+            format!("{stem} copy {counter}")
+        };
+        let file_name = match &extension {
+            Some(extension) => format!("{suffix}.{extension}"),
+            None => suffix,
+        };
+        let candidate = dir.join(file_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+        counter += 1;
+    }
 }
 
 fn ensure_parent_dir(path: &Path) -> Result<(), String> {
