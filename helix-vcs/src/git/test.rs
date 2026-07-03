@@ -119,11 +119,17 @@ fn staged_and_unstaged_changes() {
     exec_git_cmd("add tracked.txt", repo);
 
     let staged_new = repo.join("staged_new.txt");
-    File::create(&staged_new).unwrap().write_all(b"new").unwrap();
+    File::create(&staged_new)
+        .unwrap()
+        .write_all(b"new")
+        .unwrap();
     exec_git_cmd("add staged_new.txt", repo);
 
     let unstaged = repo.join("unstaged.txt");
-    File::create(&unstaged).unwrap().write_all(b"unstaged").unwrap();
+    File::create(&unstaged)
+        .unwrap()
+        .write_all(b"unstaged")
+        .unwrap();
 
     let status = git::working_tree_status(repo, true).unwrap();
 

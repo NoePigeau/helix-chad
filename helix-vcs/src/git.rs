@@ -272,7 +272,10 @@ fn status_with_staged(repo: &Repository) -> Result<WorkingTreeStatus> {
     Ok(result)
 }
 
-fn tree_index_change(work_dir: &Path, change: gix::diff::index::Change) -> Result<Option<FileChange>> {
+fn tree_index_change(
+    work_dir: &Path,
+    change: gix::diff::index::Change,
+) -> Result<Option<FileChange>> {
     use gix::diff::index::ChangeRef;
 
     let change = match change {
