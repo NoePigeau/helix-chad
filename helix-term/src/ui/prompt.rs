@@ -693,7 +693,8 @@ impl Prompt {
         self.render_input_box(input_box, style, surface, cx);
 
         if self.boxed_completions {
-            let below_completions = self.render_completion_popup(area, input_box, style, surface, cx);
+            let below_completions =
+                self.render_completion_popup(area, input_box, style, surface, cx);
             self.render_doc_popup(area, input_box, below_completions, style, surface, cx);
         }
     }
@@ -774,8 +775,12 @@ impl Prompt {
         let selected = self.selection.unwrap_or(0);
         let offset = selected / visible * visible;
 
-        for (index, (_range, completion)) in
-            self.completion.iter().enumerate().skip(offset).take(visible)
+        for (index, (_range, completion)) in self
+            .completion
+            .iter()
+            .enumerate()
+            .skip(offset)
+            .take(visible)
         {
             let row = inner.y + (index - offset) as u16;
             let is_selected = Some(index) == self.selection;

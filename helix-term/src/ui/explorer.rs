@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 
-use helix_vcs::FileChange;
 use helix_view::{
     editor::Action,
     graphics::{Color, Modifier, Rect, Style},
@@ -15,50 +14,16 @@ use tui::buffer::Buffer as Surface;
 
 use crate::compositor::{Callback, Compositor, Context, EventResult};
 use crate::job;
+use crate::ui::sidebar::{self, GitStatus, SidebarState};
 use crate::ui::{completers, icons, EditorView, Prompt, PromptEvent};
-
-const DEFAULT_WIDTH: u16 = 30;
-const MIN_WIDTH: u16 = 15;
-const MAX_WIDTH: u16 = 80;
 
 const LEFT_PADDING: u16 = 1;
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum GitStatus {
-    Added,
-    Modified,
-    Deleted,
-}
-
-impl GitStatus {
-    fn rank(self) -> u8 {
-        match self {
-            Self::Added => 1,
-            Self::Deleted => 2,
-            Self::Modified => 3,
-        }
-    }
-
-    pub(crate) fn from_change(change: &FileChange) -> Self {
-        match change {
-            FileChange::Untracked { .. } => Self::Added,
-            FileChange::Modified { .. }
-            | FileChange::Conflict { .. }
-            | FileChange::Renamed { .. } => Self::Modified,
-            FileChange::Deleted { .. } => Self::Deleted,
-        }
-    }
-
-    pub(crate) fn style(self, theme: &Theme) -> Style {
-        let (key, fallback) = match self {
-            Self::Added => ("version_control.added", Color::Rgb(0x27, 0xA6, 0x57)),
-            Self::Modified => ("version_control.modified", Color::Rgb(0xD3, 0xB0, 0x20)),
-            Self::Deleted => ("version_control.deleted", Color::Rgb(0xE0, 0x6C, 0x76)),
-        };
-        theme
-            .try_get(key)
-            .unwrap_or_else(|| Style::default().fg(fallback))
-    }
+#[derive(Debug)]
+struct DirEntry {
+    path: PathBuf,
+    is_dir: bool,
+    ignored: bool,
 }
 
 #[derive(Debug)]
@@ -70,70 +35,66 @@ struct TreeNode {
     ignored: bool,
 }
 
-#[derive(Debug)]
-pub struct ExplorerSidebar {
-    open: bool,
-    focused: bool,
-    width: u16,
-    root: PathBuf,
-    nodes: Vec<TreeNode>,
-    selected: usize,
-    scroll: usize,
-    git_status: HashMap<PathBuf, GitStatus>,
+struct NodeStyles {
+    text: Style,
+    dir: Style,
+    ignored: Style,
+    ignored_fg: Color,
+    selected: Style,
 }
 
-impl Default for ExplorerSidebar {
-    fn default() -> Self {
+impl NodeStyles {
+    fn from_theme(theme: &Theme, focused: bool) -> Self {
+        let ignored_fg = Color::Rgb(0x9a, 0xa5, 0xb1);
+
         Self {
-            open: false,
-            focused: false,
-            width: DEFAULT_WIDTH,
-            root: PathBuf::new(),
-            nodes: Vec::new(),
-            selected: 0,
-            scroll: 0,
-            git_status: HashMap::new(),
+            text: theme.get("ui.text"),
+            dir: theme.get("ui.text.focus"),
+            ignored: Style::default()
+                .fg(ignored_fg)
+                .add_modifier(Modifier::ITALIC),
+            ignored_fg,
+            selected: if focused {
+                theme.get("ui.menu.selected")
+            } else {
+                theme.get("ui.cursorline.primary")
+            },
         }
     }
+}
+
+#[derive(Debug, Default)]
+pub struct ExplorerSidebar {
+    state: SidebarState,
+    root: PathBuf,
+    nodes: Vec<TreeNode>,
+    git_status: HashMap<PathBuf, GitStatus>,
 }
 
 impl ExplorerSidebar {
     pub fn is_open(&self) -> bool {
-        self.open
+        self.state.is_open()
     }
 
     pub fn is_focused(&self) -> bool {
-        self.open && self.focused
+        self.state.is_focused()
     }
 
     pub fn width(&self) -> u16 {
-        self.width
+        self.state.width()
     }
 
     pub fn set_width(&mut self, width: u16) {
-        self.width = width.clamp(MIN_WIDTH, MAX_WIDTH);
+        self.state.set_width(width);
     }
 
-    fn open_and_focus(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
-        let root = helix_stdx::path::canonicalize(helix_loader::find_workspace().0);
-        if self.nodes.is_empty() || self.root != root {
-            self.root = root;
-            self.reload();
-        }
-        self.refresh_git_status(editor);
-
-        self.open = true;
-        self.focused = true;
-
-        if let Some(file) = current_file {
-            self.reveal(&file);
-        }
+    pub fn close(&mut self) {
+        self.state.close();
     }
 
     pub fn toggle(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
-        if self.open {
-            self.open = false;
-            self.focused = false;
+        if self.state.is_open() {
+            self.state.close();
         } else {
             self.open_and_focus(current_file, editor);
         }
@@ -144,25 +105,33 @@ impl ExplorerSidebar {
     }
 
     pub fn refresh_if_open(&mut self, editor: &Editor) {
-        if !self.open {
+        if !self.state.is_open() {
             return;
         }
         self.reload();
         self.refresh_git_status(editor);
     }
 
-    fn refresh_git_status(&mut self, editor: &Editor) {
-        use helix_loader::workspace_trust::TrustQuery;
+    fn open_and_focus(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
+        let root = helix_stdx::path::canonicalize(helix_loader::find_workspace().0);
+        if self.nodes.is_empty() || self.root != root {
+            self.root = root;
+            self.reload();
+        }
+        self.refresh_git_status(editor);
 
+        self.state.open_focused();
+
+        if let Some(file) = current_file {
+            self.reveal(&file);
+        }
+    }
+
+    fn refresh_git_status(&mut self, editor: &Editor) {
         self.git_status.clear();
 
-        let trust_full = editor
-            .workspace_trust
-            .query(
-                &helix_loader::find_workspace_in(&self.root).0,
-                TrustQuery::Git,
-            )
-            .is_trusted();
+        let workspace = helix_loader::find_workspace_in(&self.root).0;
+        let trust_full = sidebar::is_git_trusted(editor, &workspace);
 
         let Ok(changes) = editor.diff_providers.changed_files(&self.root, trust_full) else {
             return;
@@ -170,18 +139,20 @@ impl ExplorerSidebar {
 
         for change in changes {
             let status = GitStatus::from_change(&change);
-
             let path = helix_stdx::path::canonicalize(change.path());
             Self::mark_status(&mut self.git_status, path.clone(), status);
+            self.mark_ancestors(&path, status);
+        }
+    }
 
-            let mut current = path.as_path();
-            while let Some(parent) = current.parent() {
-                if parent == self.root || !parent.starts_with(&self.root) {
-                    break;
-                }
-                Self::mark_status(&mut self.git_status, parent.to_path_buf(), status);
-                current = parent;
+    fn mark_ancestors(&mut self, path: &Path, status: GitStatus) {
+        let mut current = path;
+        while let Some(parent) = current.parent() {
+            if parent == self.root || !parent.starts_with(&self.root) {
+                break;
             }
+            Self::mark_status(&mut self.git_status, parent.to_path_buf(), status);
+            current = parent;
         }
     }
 
@@ -205,7 +176,7 @@ impl ExplorerSidebar {
                 return;
             };
             if current == target {
-                self.selected = index;
+                self.state.selected = index;
                 return;
             }
             if self.nodes[index].is_dir && !self.nodes[index].expanded {
@@ -214,16 +185,7 @@ impl ExplorerSidebar {
         }
     }
 
-    fn unfocus(&mut self) {
-        self.focused = false;
-    }
-
-    pub fn close(&mut self) {
-        self.open = false;
-        self.focused = false;
-    }
-
-    fn read_dir(dir: &Path, parent_ignored: bool) -> Vec<(PathBuf, bool, bool)> {
+    fn read_dir(dir: &Path, parent_ignored: bool) -> Vec<DirEntry> {
         let mut entries: Vec<(PathBuf, bool)> = match std::fs::read_dir(dir) {
             Ok(read) => read
                 .flatten()
@@ -245,22 +207,26 @@ impl ExplorerSidebar {
             })
         });
 
-        let not_ignored = if parent_ignored {
+        let visible = if parent_ignored {
             HashSet::new()
         } else {
-            Self::not_ignored(dir)
+            Self::visible_paths(dir)
         };
 
         entries
             .into_iter()
             .map(|(path, is_dir)| {
-                let ignored = parent_ignored || !not_ignored.contains(&path);
-                (path, is_dir, ignored)
+                let ignored = parent_ignored || !visible.contains(&path);
+                DirEntry {
+                    path,
+                    is_dir,
+                    ignored,
+                }
             })
             .collect()
     }
 
-    fn not_ignored(dir: &Path) -> HashSet<PathBuf> {
+    fn visible_paths(dir: &Path) -> HashSet<PathBuf> {
         ignore::WalkBuilder::new(dir)
             .max_depth(Some(1))
             .hidden(false)
@@ -282,18 +248,15 @@ impl ExplorerSidebar {
             .filter(|node| node.is_dir && node.expanded)
             .map(|node| node.path.clone())
             .collect();
-        let selected_path = self.nodes.get(self.selected).map(|node| node.path.clone());
+        let selected_path = self
+            .nodes
+            .get(self.state.selected)
+            .map(|node| node.path.clone());
 
         let root = self.root.clone();
         self.nodes = Self::read_dir(&root, false)
             .into_iter()
-            .map(|(path, is_dir, ignored)| TreeNode {
-                path,
-                depth: 0,
-                is_dir,
-                expanded: false,
-                ignored,
-            })
+            .map(|entry| entry.into_node(0))
             .collect();
 
         let mut index = 0;
@@ -305,10 +268,10 @@ impl ExplorerSidebar {
             index += 1;
         }
 
-        self.selected = selected_path
+        self.state.selected = selected_path
             .and_then(|path| self.nodes.iter().position(|node| node.path == path))
             .unwrap_or(0);
-        self.scroll = 0;
+        self.state.scroll = 0;
     }
 
     fn expand(&mut self, index: usize) {
@@ -322,13 +285,7 @@ impl ExplorerSidebar {
 
         let children: Vec<TreeNode> = Self::read_dir(&path, parent_ignored)
             .into_iter()
-            .map(|(path, is_dir, ignored)| TreeNode {
-                path,
-                depth: depth + 1,
-                is_dir,
-                expanded: false,
-                ignored,
-            })
+            .map(|entry| entry.into_node(depth + 1))
             .collect();
 
         self.nodes[index].expanded = true;
@@ -350,35 +307,27 @@ impl ExplorerSidebar {
         for node in &mut self.nodes {
             node.expanded = false;
         }
-        self.selected = self.selected.min(self.nodes.len().saturating_sub(1));
-        self.scroll = 0;
-    }
-
-    fn move_selection(&mut self, delta: isize) {
-        if self.nodes.is_empty() {
-            return;
-        }
-        let last = self.nodes.len() - 1;
-        self.selected = (self.selected as isize + delta).clamp(0, last as isize) as usize;
+        self.state.selected = self.state.selected.min(self.nodes.len().saturating_sub(1));
+        self.state.scroll = 0;
     }
 
     fn activate(&mut self, editor: &mut Editor) {
-        let Some(node) = self.nodes.get(self.selected) else {
+        let Some(node) = self.nodes.get(self.state.selected) else {
             return;
         };
 
         if node.is_dir {
             if node.expanded {
-                self.collapse(self.selected);
+                self.collapse(self.state.selected);
             } else {
-                self.expand(self.selected);
+                self.expand(self.state.selected);
             }
         } else {
             let path = node.path.clone();
             if let Err(err) = editor.open(&path, Action::Replace) {
                 editor.set_error(format!("Failed to open {}: {}", path.display(), err));
             } else {
-                self.unfocus();
+                self.state.unfocus();
             }
         }
     }
@@ -389,65 +338,79 @@ impl ExplorerSidebar {
         }
 
         match event.code {
-            KeyCode::Char('j') | KeyCode::Down => self.move_selection(1),
-            KeyCode::Char('k') | KeyCode::Up => self.move_selection(-1),
-            KeyCode::Char('l') | KeyCode::Enter | KeyCode::Right => self.activate(editor),
-            KeyCode::Char('h') | KeyCode::Left => {
-                if let Some(node) = self.nodes.get(self.selected) {
-                    if node.is_dir && node.expanded {
-                        self.collapse(self.selected);
-                    } else if node.depth > 0 {
-                        if let Some(parent) = self.nodes[..self.selected]
-                            .iter()
-                            .rposition(|n| n.depth < node.depth)
-                        {
-                            self.selected = parent;
-                            self.collapse(parent);
-                        }
-                    }
-                }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.state.move_selection(1, self.nodes.len());
             }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.state.move_selection(-1, self.nodes.len());
+            }
+            KeyCode::Char('l') | KeyCode::Enter | KeyCode::Right => self.activate(editor),
+            KeyCode::Char('h') | KeyCode::Left => self.collapse_selected(),
             KeyCode::Char('R') => {
                 self.reload();
                 self.refresh_git_status(editor);
             }
             KeyCode::Char('a') => {
-                let target_dir = match self.nodes.get(self.selected) {
-                    Some(node) if node.is_dir => node.path.clone(),
-                    Some(node) => node
-                        .path
-                        .parent()
-                        .map(Path::to_path_buf)
-                        .unwrap_or_else(|| self.root.clone()),
-                    None => self.root.clone(),
-                };
-                return EventResult::Consumed(Some(Self::create_prompt(target_dir)));
+                return EventResult::Consumed(Some(Self::create_prompt(self.target_dir())))
             }
             KeyCode::Char('r') => {
-                if let Some(node) = self.nodes.get(self.selected) {
-                    let source = node.path.clone();
-                    return EventResult::Consumed(Some(Self::rename_prompt(source)));
+                if let Some(node) = self.nodes.get(self.state.selected) {
+                    return EventResult::Consumed(Some(Self::rename_prompt(node.path.clone())));
                 }
             }
             KeyCode::Char('d') => {
-                if let Some(node) = self.nodes.get(self.selected) {
-                    let source = node.path.clone();
-                    return EventResult::Consumed(Some(Self::delete_prompt(source)));
+                if let Some(node) = self.nodes.get(self.state.selected) {
+                    return EventResult::Consumed(Some(Self::delete_prompt(node.path.clone())));
                 }
             }
             KeyCode::Char('/') => {
-                let search_root = match self.nodes.get(self.selected) {
+                let search_root = match self.nodes.get(self.state.selected) {
                     Some(node) => node.path.clone(),
                     None => self.root.clone(),
                 };
                 return EventResult::Consumed(Some(Self::global_search_callback(search_root)));
             }
             KeyCode::Char('W') => self.collapse_all(),
-            KeyCode::Char('q') | KeyCode::Esc => self.unfocus(),
+            KeyCode::Char('q') | KeyCode::Esc => self.state.unfocus(),
             _ => {}
         }
 
         EventResult::Consumed(None)
+    }
+
+    fn collapse_selected(&mut self) {
+        let Some(node) = self.nodes.get(self.state.selected) else {
+            return;
+        };
+
+        if node.is_dir && node.expanded {
+            self.collapse(self.state.selected);
+            return;
+        }
+
+        if node.depth == 0 {
+            return;
+        }
+
+        if let Some(parent) = self.nodes[..self.state.selected]
+            .iter()
+            .rposition(|n| n.depth < node.depth)
+        {
+            self.state.selected = parent;
+            self.collapse(parent);
+        }
+    }
+
+    fn target_dir(&self) -> PathBuf {
+        match self.nodes.get(self.state.selected) {
+            Some(node) if node.is_dir => node.path.clone(),
+            Some(node) => node
+                .path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| self.root.clone()),
+            None => self.root.clone(),
+        }
     }
 
     pub(crate) fn reload_and_reveal(&mut self, path: &Path, editor: &Editor) {
@@ -580,17 +543,9 @@ impl ExplorerSidebar {
                     }
 
                     let new_path = PathBuf::from(input);
-                    if let Some(parent) = new_path.parent() {
-                        if !parent.as_os_str().is_empty() && !parent.exists() {
-                            if let Err(err) = std::fs::create_dir_all(parent) {
-                                cx.editor.set_error(format!(
-                                    "Could not create {}: {}",
-                                    parent.display(),
-                                    err
-                                ));
-                                return;
-                            }
-                        }
+                    if let Err(err) = ensure_parent_dir(&new_path) {
+                        cx.editor.set_error(err);
+                        return;
                     }
 
                     match cx.editor.move_path(&source, &new_path) {
@@ -608,106 +563,185 @@ impl ExplorerSidebar {
     pub fn render(&mut self, area: Rect, surface: &mut Surface, editor: &Editor) {
         let theme = &editor.theme;
         let background = theme.get("ui.background");
-        let text_style = theme.get("ui.text");
-        let dir_style = theme.get("ui.text.focus");
-        let ignored_fg = Color::Rgb(0x9a, 0xa5, 0xb1);
-        let ignored_style = Style::default()
-            .fg(ignored_fg)
-            .add_modifier(Modifier::ITALIC);
-        let selected_style = if self.focused {
-            theme.get("ui.menu.selected")
-        } else {
-            theme.get("ui.cursorline.primary")
-        };
-
         surface.set_style(area, background);
+
+        sidebar::draw_separator(area, surface, theme);
 
         let inner = area.clip_right(1);
         let height = inner.height as usize;
-
         let content_x = inner.x + LEFT_PADDING;
         let content_width = inner.width.saturating_sub(LEFT_PADDING);
 
-        let separator_style = theme.get("ui.window");
-        let separator_x = area.right().saturating_sub(1);
-        for y in area.top()..area.bottom() {
-            surface[(separator_x, y)]
-                .set_symbol(tui::symbols::line::VERTICAL)
-                .set_style(separator_style);
-        }
+        self.state.adjust_scroll(height);
 
-        if self.selected < self.scroll {
-            self.scroll = self.selected;
-        } else if height > 0 && self.selected >= self.scroll + height {
-            self.scroll = self.selected - height + 1;
-        }
-
-        for (row, node) in self.nodes.iter().enumerate().skip(self.scroll).take(height) {
-            let y = inner.y + (row - self.scroll) as u16;
-
-            let indent = "  ".repeat(node.depth);
-            let name = node
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-
-            let git = self.git_status.get(&node.path).copied();
-            let content_style = if node.ignored {
-                ignored_style
-            } else {
-                match git {
-                    Some(status) => status.style(theme),
-                    None if node.is_dir => dir_style,
-                    None => text_style,
-                }
-            };
-            let style = if row == self.selected {
-                if node.ignored || git.is_some() {
-                    let mut style = selected_style;
-                    style.fg = content_style.fg;
-                    if node.ignored {
-                        style = style.add_modifier(Modifier::ITALIC);
-                    }
-                    style
-                } else {
-                    selected_style
-                }
-            } else {
-                content_style
-            };
-
-            if row == self.selected {
-                surface.set_style(Rect::new(area.x, y, area.width, 1), selected_style);
-            }
-
-            let end = content_x + content_width;
-            let (x, _) = surface.set_stringn(content_x, y, &indent, content_width as usize, style);
-            let (icon, icon_color) = if node.is_dir {
-                let (glyph, _) = icons::folder_icon(node.expanded);
-                (glyph, dir_style.fg)
-            } else {
-                let (glyph, color) = icons::file_icon(&node.path);
-                (glyph, Some(color))
-            };
-            let icon_style = if node.ignored {
-                Style::default().fg(ignored_fg)
-            } else {
-                Style::default().fg(icon_color.unwrap_or(Color::Reset))
-            };
-            let glyph = format!("{} ", icon);
-            let (x, _) =
-                surface.set_stringn(x, y, &glyph, end.saturating_sub(x) as usize, icon_style);
-            let (x, _) = surface.set_stringn(x, y, &name, end.saturating_sub(x) as usize, style);
-
-            let is_modified = !node.is_dir
-                && editor
-                    .document_by_path(&node.path)
-                    .is_some_and(|doc| doc.is_modified());
-            if is_modified {
-                let dot_style = style.patch(theme.get("keyword"));
-                surface.set_stringn(x, y, " ⦁", end.saturating_sub(x) as usize, dot_style);
-            }
+        let styles = NodeStyles::from_theme(theme, self.state.is_focused());
+        for (row, node) in self
+            .nodes
+            .iter()
+            .enumerate()
+            .skip(self.state.scroll)
+            .take(height)
+        {
+            let y = inner.y + (row - self.state.scroll) as u16;
+            self.render_node(
+                row,
+                node,
+                y,
+                area,
+                content_x,
+                content_width,
+                surface,
+                editor,
+                &styles,
+            );
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_node(
+        &self,
+        index: usize,
+        node: &TreeNode,
+        y: u16,
+        area: Rect,
+        content_x: u16,
+        content_width: u16,
+        surface: &mut Surface,
+        editor: &Editor,
+        styles: &NodeStyles,
+    ) {
+        let theme = &editor.theme;
+        let git = self.git_status.get(&node.path).copied();
+        let content_style = node_content_style(node, git, styles, theme);
+
+        let selected = index == self.state.selected;
+        let style = node_row_style(selected, node.ignored, git.is_some(), content_style, styles);
+
+        if selected {
+            surface.set_style(Rect::new(area.x, y, area.width, 1), styles.selected);
+        }
+
+        let name = node
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        let end = content_x + content_width;
+        let indent = "  ".repeat(node.depth);
+        let (x, _) = surface.set_stringn(content_x, y, &indent, content_width as usize, style);
+
+        let (x, _) = render_icon(node, styles, x, y, end, surface);
+        let (x, _) = surface.set_stringn(x, y, &name, end.saturating_sub(x) as usize, style);
+
+        render_modified_dot(node, style, x, y, end, editor, surface);
+    }
+}
+
+fn render_icon(
+    node: &TreeNode,
+    styles: &NodeStyles,
+    x: u16,
+    y: u16,
+    end: u16,
+    surface: &mut Surface,
+) -> (u16, u16) {
+    let (icon, icon_color) = if node.is_dir {
+        let (glyph, _) = icons::folder_icon(node.expanded);
+        (glyph, styles.dir.fg)
+    } else {
+        let (glyph, color) = icons::file_icon(&node.path);
+        (glyph, Some(color))
+    };
+
+    let icon_style = if node.ignored {
+        Style::default().fg(styles.ignored_fg)
+    } else {
+        Style::default().fg(icon_color.unwrap_or(Color::Reset))
+    };
+
+    let glyph = format!("{icon} ");
+    surface.set_stringn(x, y, &glyph, end.saturating_sub(x) as usize, icon_style)
+}
+
+fn render_modified_dot(
+    node: &TreeNode,
+    style: Style,
+    x: u16,
+    y: u16,
+    end: u16,
+    editor: &Editor,
+    surface: &mut Surface,
+) {
+    let is_modified = !node.is_dir
+        && editor
+            .document_by_path(&node.path)
+            .is_some_and(|doc| doc.is_modified());
+    if is_modified {
+        let dot_style = style.patch(editor.theme.get("keyword"));
+        surface.set_stringn(x, y, " ⦁", end.saturating_sub(x) as usize, dot_style);
+    }
+}
+
+impl DirEntry {
+    fn into_node(self, depth: usize) -> TreeNode {
+        TreeNode {
+            path: self.path,
+            depth,
+            is_dir: self.is_dir,
+            expanded: false,
+            ignored: self.ignored,
+        }
+    }
+}
+
+fn node_content_style(
+    node: &TreeNode,
+    git: Option<GitStatus>,
+    styles: &NodeStyles,
+    theme: &Theme,
+) -> Style {
+    if node.ignored {
+        return styles.ignored;
+    }
+
+    match git {
+        Some(status) => status.style(theme),
+        None if node.is_dir => styles.dir,
+        None => styles.text,
+    }
+}
+
+fn node_row_style(
+    selected: bool,
+    ignored: bool,
+    has_git: bool,
+    content_style: Style,
+    styles: &NodeStyles,
+) -> Style {
+    if !selected {
+        return content_style;
+    }
+    if !ignored && !has_git {
+        return styles.selected;
+    }
+
+    let mut style = styles.selected;
+    style.fg = content_style.fg;
+    if ignored {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    style
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<(), String> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    if parent.as_os_str().is_empty() || parent.exists() {
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(parent)
+        .map_err(|err| format!("Could not create {}: {}", parent.display(), err))
 }

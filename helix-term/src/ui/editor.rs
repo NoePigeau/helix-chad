@@ -118,6 +118,58 @@ impl EditorView {
         self.changes.refresh_if_open(editor);
     }
 
+    fn handle_sidebar_key(
+        &mut self,
+        key: KeyEvent,
+        context: &mut crate::compositor::Context,
+    ) -> Option<EventResult> {
+        if !self.explorer.is_focused() && !self.changes.is_focused() {
+            return None;
+        }
+
+        let mut key = key;
+        canonicalize_key(&mut key);
+
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Left | KeyCode::Right)
+        {
+            self.resize_focused_sidebar(key.code);
+            return Some(EventResult::Consumed(None));
+        }
+
+        let mid_chord = !self.keymaps.pending().is_empty();
+        let leader = matches!(
+            key.code,
+            KeyCode::Char(' ') | KeyCode::Char(':') | KeyCode::Char(';')
+        );
+        if mid_chord || leader {
+            return None;
+        }
+
+        if self.explorer.is_focused() {
+            Some(self.explorer.handle_key(key, context.editor))
+        } else {
+            Some(self.changes.handle_key(key, context.editor))
+        }
+    }
+
+    fn resize_focused_sidebar(&mut self, code: KeyCode) {
+        let current = if self.explorer.is_focused() {
+            self.explorer.width()
+        } else {
+            self.changes.width()
+        };
+
+        let new_width = if code == KeyCode::Right {
+            current.saturating_add(SIDEBAR_RESIZE_STEP)
+        } else {
+            current.saturating_sub(SIDEBAR_RESIZE_STEP)
+        };
+
+        self.explorer.set_width(new_width);
+        self.changes.set_width(new_width);
+    }
+
     pub fn render_view(
         &self,
         editor: &Editor,
@@ -1543,43 +1595,12 @@ impl Component for EditorView {
         event: &Event,
         context: &mut crate::compositor::Context,
     ) -> EventResult {
-        if self.explorer.is_focused() || self.changes.is_focused() {
-            if let Event::Key(key) = event {
-                let mut key = *key;
-                canonicalize_key(&mut key);
-
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && matches!(key.code, KeyCode::Left | KeyCode::Right)
-                {
-                    let current = if self.explorer.is_focused() {
-                        self.explorer.width()
-                    } else {
-                        self.changes.width()
-                    };
-                    let new_width = if key.code == KeyCode::Right {
-                        current.saturating_add(SIDEBAR_RESIZE_STEP)
-                    } else {
-                        current.saturating_sub(SIDEBAR_RESIZE_STEP)
-                    };
-                    self.explorer.set_width(new_width);
-                    self.changes.set_width(new_width);
-                    return EventResult::Consumed(None);
-                }
-
-                let mid_chord = !self.keymaps.pending().is_empty();
-                let leader = matches!(
-                    key.code,
-                    KeyCode::Char(' ') | KeyCode::Char(':') | KeyCode::Char(';')
-                );
-                if !mid_chord && !leader {
-                    if self.explorer.is_focused() {
-                        return self.explorer.handle_key(key, context.editor);
-                    } else {
-                        return self.changes.handle_key(key, context.editor);
-                    }
-                }
+        if let Event::Key(key) = event {
+            if let Some(result) = self.handle_sidebar_key(*key, context) {
+                return result;
             }
         }
+
         let mut cx = commands::Context {
             editor: context.editor,
             count: None,
