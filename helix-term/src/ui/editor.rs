@@ -838,6 +838,17 @@ impl EditorView {
                 area_width.saturating_sub(used_width) as usize
             };
 
+            let (glyph, icon_color) = crate::ui::icons::file_icon(doc.path().unwrap_or(&scratch));
+            x = surface
+                .set_stringn(
+                    x,
+                    viewport.y,
+                    &format!(" {glyph}"),
+                    rem_width(x),
+                    style.fg(icon_color),
+                )
+                .0;
+
             x = surface
                 .set_stringn(x, viewport.y, &format!(" {}", fname), rem_width(x), style)
                 .0;
@@ -845,7 +856,13 @@ impl EditorView {
             if doc.is_modified() {
                 let dot_style = style.patch(editor.theme.get("keyword"));
                 x = surface
-                    .set_stringn(x, viewport.y, " ⦁", rem_width(x), dot_style)
+                    .set_stringn(
+                        x,
+                        viewport.y,
+                        &format!(" {}", crate::ui::icons::UNSAVED_DOT),
+                        rem_width(x),
+                        dot_style,
+                    )
                     .0;
             }
 

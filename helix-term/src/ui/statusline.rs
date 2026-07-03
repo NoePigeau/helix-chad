@@ -481,7 +481,8 @@ where
 {
     if context.doc.is_modified() {
         let style = context.editor.theme.get("keyword");
-        write(context, Span::styled(" ⦁ ", style));
+        let indicator = format!(" {} ", crate::ui::icons::UNSAVED_DOT);
+        write(context, Span::styled(indicator, style));
     } else {
         write(context, "   ".into());
     }

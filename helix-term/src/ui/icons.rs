@@ -4,6 +4,8 @@ use helix_view::graphics::Color;
 
 type Icon = (&'static str, Color);
 
+pub const UNSAVED_DOT: &str = "\u{f444}";
+
 const RUST: Icon = ("\u{e7a8}", Color::Rgb(0xde, 0xa5, 0x84));
 const JS: Icon = ("\u{e74e}", Color::Rgb(0xcb, 0xcb, 0x41));
 const TS: Icon = ("\u{e628}", Color::Rgb(0x51, 0x9a, 0xba));

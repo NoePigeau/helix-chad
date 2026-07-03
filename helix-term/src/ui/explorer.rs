@@ -731,7 +731,8 @@ fn render_modified_dot(
             .is_some_and(|doc| doc.is_modified());
     if is_modified {
         let dot_style = style.patch(editor.theme.get("keyword"));
-        surface.set_stringn(x, y, " ⦁", end.saturating_sub(x) as usize, dot_style);
+        let dot = format!(" {}", icons::UNSAVED_DOT);
+        surface.set_stringn(x, y, &dot, end.saturating_sub(x) as usize, dot_style);
     }
 }
 
