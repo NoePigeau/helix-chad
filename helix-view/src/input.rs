@@ -458,6 +458,15 @@ impl<'de> Deserialize<'de> for KeyEvent {
     }
 }
 
+impl serde::Serialize for KeyEvent {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
 #[cfg(feature = "term")]
 impl From<termina::event::Event> for Event {
     fn from(event: termina::event::Event) -> Self {

@@ -8,7 +8,7 @@ use crate::{
     graphics::{CursorKind, Rect},
     handlers::Handlers,
     info::Info,
-    input::KeyEvent,
+    input::{KeyCode, KeyEvent, KeyModifiers},
     register::Registers,
     theme::{self, Theme},
     tree::{self, Tree},
@@ -434,6 +434,78 @@ pub struct Config {
     pub buffer_picker: BufferPickerConfig,
     /// Workspace-trust configuration.
     pub workspace_trust: WorkspaceTrustConfig,
+    /// Keybindings for the file explorer / git changes sidebars.
+    pub sidebar: SidebarConfig,
+}
+
+/// Action keys for the file explorer and git changes sidebars (`[editor.sidebar]`).
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SidebarConfig {
+    /// Keys for the file explorer sidebar.
+    pub file_explorer: ExplorerKeysConfig,
+    /// Keys for the git changes sidebar.
+    pub git_changes: ChangesKeysConfig,
+}
+
+/// Action keys for the file explorer sidebar.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ExplorerKeysConfig {
+    /// Create a file or directory. Defaults to `a`.
+    pub create: KeyEvent,
+    /// Rename the selected entry. Defaults to `r`.
+    pub rename: KeyEvent,
+    /// Delete the selected entry. Defaults to `d`.
+    pub delete: KeyEvent,
+    /// Scoped search within the selected folder or file. Defaults to `/`.
+    pub search: KeyEvent,
+    /// Collapse all folders. Defaults to `W`.
+    pub collapse_all: KeyEvent,
+    /// Reload the tree. Defaults to `R`.
+    pub reload: KeyEvent,
+}
+
+impl Default for ExplorerKeysConfig {
+    fn default() -> Self {
+        Self {
+            create: char_key('a'),
+            rename: char_key('r'),
+            delete: char_key('d'),
+            search: char_key('/'),
+            collapse_all: char_key('W'),
+            reload: char_key('R'),
+        }
+    }
+}
+
+/// Action keys for the git changes sidebar.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ChangesKeysConfig {
+    /// Stage or unstage the selected change. Defaults to `s`.
+    pub stage: KeyEvent,
+    /// Discard the selected change. Defaults to `d`.
+    pub discard: KeyEvent,
+    /// Reload the change list. Defaults to `R`.
+    pub reload: KeyEvent,
+}
+
+impl Default for ChangesKeysConfig {
+    fn default() -> Self {
+        Self {
+            stage: char_key('s'),
+            discard: char_key('d'),
+            reload: char_key('R'),
+        }
+    }
+}
+
+fn char_key(c: char) -> KeyEvent {
+    KeyEvent {
+        code: KeyCode::Char(c),
+        modifiers: KeyModifiers::NONE,
+    }
 }
 
 /// User-facing configuration for `[editor.workspace-trust]`.
@@ -1240,6 +1312,7 @@ impl Default for Config {
             kitty_keyboard_protocol: Default::default(),
             buffer_picker: BufferPickerConfig::default(),
             workspace_trust: WorkspaceTrustConfig::default(),
+            sidebar: SidebarConfig::default(),
         }
     }
 }

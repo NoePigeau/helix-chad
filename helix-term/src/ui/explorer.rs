@@ -92,14 +92,6 @@ impl ExplorerSidebar {
         self.state.close();
     }
 
-    pub fn toggle(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
-        if self.state.is_open() {
-            self.state.close();
-        } else {
-            self.open_and_focus(current_file, editor);
-        }
-    }
-
     pub fn focus(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
         self.open_and_focus(current_file, editor);
     }
@@ -337,6 +329,40 @@ impl ExplorerSidebar {
             return EventResult::Ignored(None);
         }
 
+        let keys = editor.config().sidebar.file_explorer.clone();
+
+        if event == keys.create {
+            return EventResult::Consumed(Some(Self::create_prompt(self.target_dir())));
+        }
+        if event == keys.rename {
+            if let Some(node) = self.nodes.get(self.state.selected) {
+                return EventResult::Consumed(Some(Self::rename_prompt(node.path.clone())));
+            }
+            return EventResult::Consumed(None);
+        }
+        if event == keys.delete {
+            if let Some(node) = self.nodes.get(self.state.selected) {
+                return EventResult::Consumed(Some(Self::delete_prompt(node.path.clone())));
+            }
+            return EventResult::Consumed(None);
+        }
+        if event == keys.search {
+            let search_root = match self.nodes.get(self.state.selected) {
+                Some(node) => node.path.clone(),
+                None => self.root.clone(),
+            };
+            return EventResult::Consumed(Some(Self::global_search_callback(search_root)));
+        }
+        if event == keys.collapse_all {
+            self.collapse_all();
+            return EventResult::Consumed(None);
+        }
+        if event == keys.reload {
+            self.reload();
+            self.refresh_git_status(editor);
+            return EventResult::Consumed(None);
+        }
+
         match event.code {
             KeyCode::Char('j') | KeyCode::Down => {
                 self.state.move_selection(1, self.nodes.len());
@@ -346,31 +372,6 @@ impl ExplorerSidebar {
             }
             KeyCode::Char('l') | KeyCode::Enter | KeyCode::Right => self.activate(editor),
             KeyCode::Char('h') | KeyCode::Left => self.collapse_selected(),
-            KeyCode::Char('R') => {
-                self.reload();
-                self.refresh_git_status(editor);
-            }
-            KeyCode::Char('a') => {
-                return EventResult::Consumed(Some(Self::create_prompt(self.target_dir())))
-            }
-            KeyCode::Char('r') => {
-                if let Some(node) = self.nodes.get(self.state.selected) {
-                    return EventResult::Consumed(Some(Self::rename_prompt(node.path.clone())));
-                }
-            }
-            KeyCode::Char('d') => {
-                if let Some(node) = self.nodes.get(self.state.selected) {
-                    return EventResult::Consumed(Some(Self::delete_prompt(node.path.clone())));
-                }
-            }
-            KeyCode::Char('/') => {
-                let search_root = match self.nodes.get(self.state.selected) {
-                    Some(node) => node.path.clone(),
-                    None => self.root.clone(),
-                };
-                return EventResult::Consumed(Some(Self::global_search_callback(search_root)));
-            }
-            KeyCode::Char('W') => self.collapse_all(),
             KeyCode::Char('q') | KeyCode::Esc => self.state.unfocus(),
             _ => {}
         }

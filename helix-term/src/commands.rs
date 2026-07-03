@@ -406,9 +406,11 @@ impl MappableCommand {
         file_explorer, "Open file explorer in workspace root",
         file_explorer_in_current_buffer_directory, "Open file explorer at current buffer's directory",
         file_explorer_in_current_directory, "Open file explorer at current working directory",
-        toggle_file_explorer, "Toggle file explorer sidebar",
+        toggle_sidebar, "Toggle the sidebar (file explorer / git changes)",
         focus_file_explorer, "Focus file explorer sidebar",
-        toggle_changes_sidebar, "Toggle git changes sidebar",
+        focus_changes_sidebar, "Focus git changes sidebar",
+        widen_sidebar, "Widen the focused sidebar",
+        narrow_sidebar, "Narrow the focused sidebar",
         code_action, "Perform code action",
         buffer_picker, "Open buffer picker",
         jumplist_picker, "Open jumplist picker",
@@ -3195,11 +3197,11 @@ fn file_picker(cx: &mut Context) {
     cx.push_layer(Box::new(overlaid(picker)));
 }
 
-fn toggle_file_explorer(cx: &mut Context) {
+fn toggle_sidebar(cx: &mut Context) {
     let current_file = doc!(cx.editor).path().map(|path| path.to_path_buf());
     cx.callback.push(Box::new(move |compositor, cx| {
         if let Some(editor_view) = compositor.find::<ui::EditorView>() {
-            editor_view.toggle_explorer(current_file, cx.editor);
+            editor_view.toggle_sidebar(current_file, cx.editor);
         }
     }));
 }
@@ -3213,10 +3215,26 @@ fn focus_file_explorer(cx: &mut Context) {
     }));
 }
 
-fn toggle_changes_sidebar(cx: &mut Context) {
+fn focus_changes_sidebar(cx: &mut Context) {
     cx.callback.push(Box::new(|compositor, cx| {
         if let Some(editor_view) = compositor.find::<ui::EditorView>() {
-            editor_view.toggle_changes(cx.editor);
+            editor_view.focus_changes(cx.editor);
+        }
+    }));
+}
+
+fn widen_sidebar(cx: &mut Context) {
+    cx.callback.push(Box::new(|compositor, _cx| {
+        if let Some(editor_view) = compositor.find::<ui::EditorView>() {
+            editor_view.widen_sidebar();
+        }
+    }));
+}
+
+fn narrow_sidebar(cx: &mut Context) {
+    cx.callback.push(Box::new(|compositor, _cx| {
+        if let Some(editor_view) = compositor.find::<ui::EditorView>() {
+            editor_view.narrow_sidebar();
         }
     }));
 }

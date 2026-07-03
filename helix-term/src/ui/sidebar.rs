@@ -103,12 +103,6 @@ impl SidebarState {
         self.focused = true;
     }
 
-    pub fn focus(&mut self) {
-        if self.open {
-            self.focused = true;
-        }
-    }
-
     pub fn close(&mut self) {
         self.open = false;
         self.focused = false;

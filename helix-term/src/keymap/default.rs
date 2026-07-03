@@ -190,7 +190,9 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
         "C-u" => page_cursor_half_up,
         "C-d" => page_cursor_half_down,
 
-        "C-e" => toggle_file_explorer,
+        "C-e" => toggle_sidebar,
+        "C-right" => widen_sidebar,
+        "C-left" => narrow_sidebar,
 
         "C-w" => { "Window"
             "C-w" | "w" => rotate_view,
@@ -235,7 +237,7 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "S" => lsp_or_syntax_workspace_symbol_picker,
             "d" => diagnostics_picker,
             "D" => workspace_diagnostics_picker,
-            "g" => toggle_changes_sidebar,
+            "g" => focus_changes_sidebar,
             "a" => code_action,
             "'" => last_picker,
             "G" => { "Debug (experimental)" sticky=true

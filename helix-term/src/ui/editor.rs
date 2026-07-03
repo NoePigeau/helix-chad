@@ -90,10 +90,12 @@ impl EditorView {
         &mut self.spinners
     }
 
-    pub fn toggle_explorer(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
-        self.explorer.toggle(current_file, editor);
-        if self.explorer.is_open() {
+    pub fn toggle_sidebar(&mut self, current_file: Option<PathBuf>, editor: &Editor) {
+        if self.explorer.is_open() || self.changes.is_open() {
+            self.explorer.close();
             self.changes.close();
+        } else {
+            self.explorer.focus(current_file, editor);
         }
     }
 
@@ -102,15 +104,9 @@ impl EditorView {
         self.changes.close();
     }
 
-    pub fn toggle_changes(&mut self, editor: &Editor) {
-        if self.changes.is_open() && !self.changes.is_focused() {
-            self.changes.focus_panel();
-        } else {
-            self.changes.toggle(editor);
-        }
-        if self.changes.is_open() {
-            self.explorer.close();
-        }
+    pub fn focus_changes(&mut self, editor: &Editor) {
+        self.changes.focus(editor);
+        self.explorer.close();
     }
 
     pub fn refresh_sidebars(&mut self, editor: &Editor) {
@@ -130,13 +126,6 @@ impl EditorView {
         let mut key = key;
         canonicalize_key(&mut key);
 
-        if key.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(key.code, KeyCode::Left | KeyCode::Right)
-        {
-            self.resize_focused_sidebar(key.code);
-            return Some(EventResult::Consumed(None));
-        }
-
         let mid_chord = !self.keymaps.pending().is_empty();
         let leader = matches!(
             key.code,
@@ -146,21 +135,38 @@ impl EditorView {
             return None;
         }
 
-        if self.explorer.is_focused() {
-            Some(self.explorer.handle_key(key, context.editor))
+        let result = if self.explorer.is_focused() {
+            self.explorer.handle_key(key, context.editor)
         } else {
-            Some(self.changes.handle_key(key, context.editor))
+            self.changes.handle_key(key, context.editor)
+        };
+
+        match result {
+            EventResult::Ignored(_) => None,
+            consumed => Some(consumed),
         }
     }
 
-    fn resize_focused_sidebar(&mut self, code: KeyCode) {
+    pub fn widen_sidebar(&mut self) {
+        self.resize_focused_sidebar(true);
+    }
+
+    pub fn narrow_sidebar(&mut self) {
+        self.resize_focused_sidebar(false);
+    }
+
+    fn resize_focused_sidebar(&mut self, widen: bool) {
+        if !self.explorer.is_focused() && !self.changes.is_focused() {
+            return;
+        }
+
         let current = if self.explorer.is_focused() {
             self.explorer.width()
         } else {
             self.changes.width()
         };
 
-        let new_width = if code == KeyCode::Right {
+        let new_width = if widen {
             current.saturating_add(SIDEBAR_RESIZE_STEP)
         } else {
             current.saturating_sub(SIDEBAR_RESIZE_STEP)

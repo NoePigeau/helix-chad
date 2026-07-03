@@ -131,17 +131,9 @@ impl ChangesSidebar {
         self.state.unfocus();
     }
 
-    pub fn focus_panel(&mut self) {
-        self.state.focus();
-    }
-
-    pub fn toggle(&mut self, editor: &Editor) {
-        if self.state.is_open() {
-            self.state.close();
-        } else {
-            self.refresh(editor);
-            self.state.open_focused();
-        }
+    pub fn focus(&mut self, editor: &Editor) {
+        self.refresh(editor);
+        self.state.open_focused();
     }
 
     pub fn refresh_if_open(&mut self, editor: &Editor) {
@@ -329,6 +321,34 @@ impl ChangesSidebar {
             return EventResult::Ignored(None);
         }
 
+        let keys = editor.config().sidebar.git_changes.clone();
+
+        if event == keys.stage {
+            if let Some(row) = self.selected_file() {
+                return EventResult::Consumed(Some(Self::toggle_stage_prompt(
+                    self.root.clone(),
+                    row.path.clone(),
+                    row.section.is_staged(),
+                )));
+            }
+            return EventResult::Consumed(None);
+        }
+        if event == keys.discard {
+            if let Some(row) = self.selected_file() {
+                return EventResult::Consumed(Some(Self::discard_prompt(
+                    self.root.clone(),
+                    row.path.clone(),
+                    row.status,
+                    row.section.is_staged(),
+                )));
+            }
+            return EventResult::Consumed(None);
+        }
+        if event == keys.reload {
+            self.refresh(editor);
+            return EventResult::Consumed(None);
+        }
+
         match event.code {
             KeyCode::Char('j') | KeyCode::Down => {
                 self.state.move_selection(1, self.rows.len());
@@ -338,26 +358,6 @@ impl ChangesSidebar {
             }
             KeyCode::Char('l') | KeyCode::Enter | KeyCode::Right => return self.activate(),
             KeyCode::Char('h') | KeyCode::Left => self.collapse_selected(),
-            KeyCode::Char('s') => {
-                if let Some(row) = self.selected_file() {
-                    return EventResult::Consumed(Some(Self::toggle_stage_prompt(
-                        self.root.clone(),
-                        row.path.clone(),
-                        row.section.is_staged(),
-                    )));
-                }
-            }
-            KeyCode::Char('d') => {
-                if let Some(row) = self.selected_file() {
-                    return EventResult::Consumed(Some(Self::discard_prompt(
-                        self.root.clone(),
-                        row.path.clone(),
-                        row.status,
-                        row.section.is_staged(),
-                    )));
-                }
-            }
-            KeyCode::Char('R') => self.refresh(editor),
             KeyCode::Char('q') | KeyCode::Esc => self.state.unfocus(),
             _ => {}
         }
