@@ -1,82 +1,108 @@
-<div align="center">
+# Helix chad
 
-<h1>helix-chad</h1>
+A fork of [Helix](https://github.com/helix-editor/helix) — a nod to [NvChad](https://nvchad.com/), bringing its IDE-like, batteries-included feel (file tree, git integration, a polished UI) to the modal terminal editor. Everything under the hood is still plain Helix — see the [Helix docs](https://docs.helix-editor.com/).
 
-A fork of [Helix](https://github.com/helix-editor/helix) with two sidebars and richer git integration.
-
-</div>
-
----
-
-helix-chad is [Helix](https://github.com/helix-editor/helix) — the modal terminal editor written in Rust — plus a few IDE-like touches:
-
-- 📂 **File explorer** sidebar with folder icons
-- 🌿 **Git changes** sidebar
-- 🎨 **Git status colors** on files, folders, and buffer titles
-
-Everything else (editing model, language support, configuration) is standard Helix — see the [Helix docs](https://docs.helix-editor.com/).
+> **Note:** icons require a [Nerd Font](https://www.nerdfonts.com/) in your terminal. Without one they show up as tofu (□).
 
 ## Features
 
-**File explorer** — browse and edit the file tree (nvim-tree style).
-- Nerd Font folder icons instead of expand triangles.
-- Git status colors per file, propagated up to parent folders (VSCode style).
-- Create (`a`), rename (`r`), delete (`d`) files from the sidebar.
-- Search (`/`) scoped to the selected folder (recursively) or file, like `Space /` but narrowed.
+### File explorer sidebar
 
+An nvim-tree style tree browser.
+
+- Nerd Font folder and file-type icons.
+- Git status colors per file, propagated up to parent folders (VSCode style).
+- Ignored files greyed and italic.
+- Create, rename (auto-creates parent dirs) and delete files inline.
+- Scoped search — `Space /` narrowed to the selected folder (recursive) or file.
+- Reveals and expands to the current file when opened.
 
 <img src="./contrib/sidebar-explorer.png" alt="File explorer" width="700">
 
-> **Note:** the folder icons require a [Nerd Font](https://www.nerdfonts.com/) in your terminal. Without one, the icons show up as tofu (□).
+### Git changes sidebar
 
-**Git changes** — list of changed files (Zed style).
-- A `Staged` group plus Added / Modified / Deleted groups for the unstaged changes, with counts.
-- Single-child folder chains are collapsed into one line (`src/routes/api.export`).
-- Enter opens the file in the editor.
-- Stage / unstage (`s`) and discard (`d`) a change directly from the sidebar.
+A Zed style list of changed files.
 
+- A `Staged` group plus Added / Modified / Deleted groups for the unstaged changes, each with counts.
+- Single-child folder chains collapsed into one line (`src/routes/api.export`).
+- Stage / unstage and discard a change directly from the sidebar.
+- Enter opens the file and jumps to its first diff hunk.
 
 <img src="./contrib/sidebar-git-change.png" alt="Git changes" width="700">
 
+### Git status colors
+
+- Applied to explorer files and folders, git changes rows, and buffer titles in the bufferline.
+- The `[+]` modified marker becomes a colored dot (`⦁`) in the statusline and bufferline.
+- Themeable, with these defaults:
+
+| Status   | Theme key                  | Color     |
+| -------- | -------------------------- | --------- |
+| Added    | `version_control.added`    | `#27A657` |
+| Modified | `version_control.modified` | `#D3B020` |
+| Deleted  | `version_control.deleted`  | `#E06C76` |
+
+### Polished UI
+
+- Floating, rounded search box for `/`.
+- Command line (`:`) as a floating box with completion and documentation popups.
+- Pickers with rounded borders and centered titles.
+- Extra theme: `zed_one_light_v2`.
+
 ## Keybindings
 
-| Key | Action |
-|---|---|
-| `Ctrl-e` | Toggle the file explorer |
-| `Space e` | Focus the explorer on the current file |
-| `Space g` | Toggle the git changes sidebar |
+| Default key | Action                                                                            | Command                 |
+| ----------- | --------------------------------------------------------------------------------- | ----------------------- |
+| `Ctrl-e`    | Toggle the sidebar (opens the file explorer, or closes whichever sidebar is open) | `toggle_sidebar`        |
+| `Space e`   | Focus the file explorer on the current file                                       | `focus_file_explorer`   |
+| `Space g`   | Focus the git changes sidebar                                                     | `focus_changes_sidebar` |
+| `Ctrl-→`    | Widen the focused sidebar                                                         | `widen_sidebar`         |
+| `Ctrl-←`    | Narrow the focused sidebar                                                        | `narrow_sidebar`        |
+
+These are regular defaults — rebind any of them from your `config.toml` using the command name:
+
+```toml
+[keys.normal]
+C-e = "toggle_sidebar"
+space.e = "focus_file_explorer"
+space.g = "focus_changes_sidebar"
+C-right = "widen_sidebar"
+C-left = "narrow_sidebar"
+```
 
 Inside a sidebar:
 
-| Key | Action |
-|---|---|
-| `j` / `k` | Move up / down |
-| `l` / `Enter` | Expand folder or open file |
-| `h` | Collapse / go to parent |
-| `Ctrl-→` / `Ctrl-←` | Widen / narrow the sidebar (both sidebars stay the same width) |
-| `R` | Reload |
-| `q` / `Esc` | Return focus to the editor |
+| Default key     | Action                                   |
+| --------------- | ---------------------------------------- |
+| `j` / `k`       | Move up / down                           |
+| `l` / `Enter`   | Expand folder or open file               |
+| `h`             | Collapse / go to parent                  |
+| `a` / `r` / `d` | Create / rename / delete (file explorer) |
+| `s` / `d`       | Stage-unstage / discard (git changes)    |
+| `/`             | Scoped search (file explorer)            |
+| `R`             | Reload                                   |
+| `W`             | Collapse all folders.                    |
+| `q` / `Esc`     | Return focus to the editor               |
 
-The two sidebars are mutually exclusive. `Space` and `:` still work while a sidebar is focused, so you can switch between them or run commands without leaving.
+`Space` and `:` still work while a sidebar is focused, so you can switch between sidebars or run any command without leaving.
 
-## Git colors
+The action keys inside each sidebar are configurable from your `config.toml` (defaults shown):
 
-Themeable, with these defaults:
+```toml
+[editor.sidebar.file-explorer]
+create = "a"
+rename = "r"
+delete = "d"
+search = "/"
+collapse-all = "W"
+reload = "R"
 
-| Status | Theme key | Color |
-|---|---|---|
-| Added | `version_control.added` | `#27A657` |
-| Modified | `version_control.modified` | `#D3B020` |
-| Deleted | `version_control.deleted` | `#E06C76` |
+[editor.sidebar.git-changes]
+stage = "s"
+discard = "d"
+reload = "R"
+```
 
 ## Install
 
-```sh
-cargo install --path helix-term --locked
-```
-
-See the [Helix install docs](https://docs.helix-editor.com/install.html) for prerequisites. Folder icons require a [Nerd Font](https://www.nerdfonts.com/) in your terminal.
-
-## Credits
-
-A fork of [Helix](https://github.com/helix-editor/helix). Thanks to the Helix community. ❤️
+See the [Helix install docs](https://docs.helix-editor.com/install.html) for prerequisites.
