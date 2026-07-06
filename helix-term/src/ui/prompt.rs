@@ -141,8 +141,9 @@ impl Prompt {
         self
     }
 
-    pub fn as_search_bar(mut self) -> Self {
+    pub fn as_search_bar(mut self, title: impl Into<Cow<'static, str>>) -> Self {
         self.search_bar = true;
+        self.box_title = title.into();
         self
     }
 

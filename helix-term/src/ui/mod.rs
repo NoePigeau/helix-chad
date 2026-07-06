@@ -86,6 +86,7 @@ pub fn regex_prompt(
     cx: &mut crate::commands::Context,
     prompt: std::borrow::Cow<'static, str>,
     history_register: Option<char>,
+    search_title: Option<std::borrow::Cow<'static, str>>,
     completion_fn: impl FnMut(&Editor, &str) -> Vec<prompt::Completion> + 'static,
     fun: impl Fn(&mut crate::compositor::Context, rope::Regex, PromptEvent) + 'static,
 ) {
@@ -93,23 +94,7 @@ pub fn regex_prompt(
         cx,
         prompt,
         history_register,
-        false,
-        completion_fn,
-        move |cx, regex, _, event| fun(cx, regex, event),
-    );
-}
-pub fn regex_search_prompt(
-    cx: &mut crate::commands::Context,
-    prompt: std::borrow::Cow<'static, str>,
-    history_register: Option<char>,
-    completion_fn: impl FnMut(&Editor, &str) -> Vec<prompt::Completion> + 'static,
-    fun: impl Fn(&mut crate::compositor::Context, rope::Regex, PromptEvent) + 'static,
-) {
-    raw_regex_prompt(
-        cx,
-        prompt,
-        history_register,
-        true,
+        search_title,
         completion_fn,
         move |cx, regex, _, event| fun(cx, regex, event),
     );
@@ -118,7 +103,7 @@ pub fn raw_regex_prompt(
     cx: &mut crate::commands::Context,
     prompt: std::borrow::Cow<'static, str>,
     history_register: Option<char>,
-    search_bar: bool,
+    search_title: Option<std::borrow::Cow<'static, str>>,
     completion_fn: impl FnMut(&Editor, &str) -> Vec<prompt::Completion> + 'static,
     fun: impl Fn(&mut crate::compositor::Context, rope::Regex, &str, PromptEvent) + 'static,
 ) {
@@ -214,8 +199,8 @@ pub fn raw_regex_prompt(
     )
     .with_language("regex", std::sync::Arc::clone(&cx.editor.syn_loader));
 
-    if search_bar {
-        prompt = prompt.as_search_bar();
+    if let Some(title) = search_title {
+        prompt = prompt.as_search_bar(title);
     }
 
     // Calculate initial completion

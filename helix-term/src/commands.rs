@@ -2199,6 +2199,7 @@ fn select_regex(cx: &mut Context) {
         cx,
         "select:".into(),
         Some(reg),
+        Some("Select".into()),
         ui::completers::none,
         move |cx, regex, event| {
             let (view, doc) = current!(cx.editor);
@@ -2223,6 +2224,7 @@ fn split_selection(cx: &mut Context) {
         cx,
         "split:".into(),
         Some(reg),
+        Some("Split".into()),
         ui::completers::none,
         move |cx, regex, event| {
             let (view, doc) = current!(cx.editor);
@@ -2369,10 +2371,11 @@ fn searcher(cx: &mut Context, direction: Direction) {
     // TODO: could probably share with select_on_matches?
     let completions = search_completions(cx, Some(reg));
 
-    ui::regex_search_prompt(
+    ui::regex_prompt(
         cx,
         "search:".into(),
         Some(reg),
+        Some("Search".into()),
         move |_editor: &Editor, input: &str| {
             completions
                 .iter()
@@ -5512,6 +5515,7 @@ fn keep_or_remove_selections_impl(cx: &mut Context, remove: bool) {
         cx,
         if remove { "remove:" } else { "keep:" }.into(),
         Some(reg),
+        None,
         ui::completers::none,
         move |cx, regex, event| {
             let (view, doc) = current!(cx.editor);
