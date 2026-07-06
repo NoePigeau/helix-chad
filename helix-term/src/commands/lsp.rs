@@ -21,7 +21,7 @@ use helix_stdx::path;
 use helix_view::{
     action::Action as CodeActionItem,
     document::{DocumentInlayHints, DocumentInlayHintsId},
-    editor::Action,
+    editor::{Action, Rename},
     handlers::lsp::SignatureHelpInvoked,
     theme::Style,
     Document, DocumentId, View,
@@ -1149,18 +1149,23 @@ pub fn hover(cx: &mut Context) {
 }
 
 pub fn rename_symbol(cx: &mut Context) {
+    fn symbol_range(
+        text: helix_core::RopeSlice,
+        selection: helix_core::Range,
+    ) -> helix_core::Range {
+        use helix_core::textobject::{textobject_word, TextObject};
+        if selection.len() > 1 {
+            selection
+        } else {
+            textobject_word(text, selection, TextObject::Inside, 1, false)
+        }
+    }
+
     fn get_prefill_from_word_boundary(editor: &Editor) -> String {
         let (view, doc) = current_ref!(editor);
         let text = doc.text().slice(..);
         let primary_selection = doc.selection(view.id).primary();
-        if primary_selection.len() > 1 {
-            primary_selection
-        } else {
-            use helix_core::textobject::{textobject_word, TextObject};
-            textobject_word(text, primary_selection, TextObject::Inside, 1, false)
-        }
-        .fragment(text)
-        .into()
+        symbol_range(text, primary_selection).fragment(text).into()
     }
 
     fn get_prefill_from_lsp_response(
@@ -1187,17 +1192,35 @@ pub fn rename_symbol(cx: &mut Context) {
         }
     }
 
+    fn build_rename_state(editor: &Editor, prefill: &str) -> Rename {
+        let (view, doc) = current_ref!(editor);
+        let text = doc.text().slice(..);
+        let primary = doc.selection(view.id).primary();
+        Rename {
+            view_id: view.id,
+            anchor_line: text.char_to_line(primary.cursor(text)),
+            symbol_char_idx: symbol_range(text, primary).from(),
+            input: prefill.to_string(),
+            cursor: prefill.len(),
+        }
+    }
+
     fn create_rename_prompt(
-        editor: &Editor,
+        editor: &mut Editor,
         prefill: String,
         history_register: Option<char>,
         language_server_id: Option<LanguageServerId>,
-    ) -> Box<ui::Prompt> {
+    ) -> Box<ui::RenamePrompt> {
+        editor.rename = Some(build_rename_state(editor, &prefill));
+
         let prompt = ui::Prompt::new(
-            "rename-to:".into(),
+            "".into(),
             history_register,
             ui::completers::none,
             move |cx: &mut compositor::Context, input: &str, event: PromptEvent| {
+                if matches!(event, PromptEvent::Abort | PromptEvent::Validate) {
+                    cx.editor.rename = None;
+                }
                 if event != PromptEvent::Validate {
                     return;
                 }
@@ -1230,7 +1253,7 @@ pub fn rename_symbol(cx: &mut Context) {
         )
         .with_line(prefill, editor);
 
-        Box::new(prompt)
+        Box::new(ui::RenamePrompt::new(prompt))
     }
 
     let (view, doc) = current_ref!(cx.editor);

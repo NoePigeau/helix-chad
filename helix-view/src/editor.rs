@@ -1439,6 +1439,15 @@ pub struct Editor {
     pub mouse_down_range: Option<Range>,
     pub cursor_cache: CursorCache,
     pub workspace_trust: WorkspaceTrust,
+    pub rename: Option<Rename>,
+}
+
+pub struct Rename {
+    pub view_id: ViewId,
+    pub anchor_line: usize,
+    pub symbol_char_idx: usize,
+    pub input: String,
+    pub cursor: usize,
 }
 
 pub type Motion = Box<dyn Fn(&mut Editor)>;
@@ -1564,6 +1573,7 @@ impl Editor {
             cursor_cache: CursorCache::default(),
             dir_stack: VecDeque::with_capacity(DIR_STACK_CAP),
             workspace_trust,
+            rename: None,
         }
     }
 

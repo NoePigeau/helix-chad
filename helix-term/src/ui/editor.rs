@@ -9,7 +9,8 @@ use crate::{
         document::{render_document, LinePos, TextRenderer},
         statusline,
         text_decorations::{self, Decoration, DecorationManager, InlineDiagnostics},
-        ChangesSidebar, Completion, ExplorerSidebar, GitStatus, ProgressSpinners,
+        ChangesSidebar, Completion, ExplorerSidebar, GitStatus, ProgressSpinners, RenameDecoration,
+        RenameLineAnnotation,
     },
 };
 
@@ -193,8 +194,17 @@ impl EditorView {
 
         let view_offset = doc.view_offset(view.id);
 
-        let text_annotations = view.text_annotations(doc, Some(theme));
+        let mut text_annotations = view.text_annotations(doc, Some(theme));
         let mut decorations = DecorationManager::default();
+
+        let rename = editor
+            .rename
+            .as_ref()
+            .filter(|rename| rename.view_id == view.id);
+        if let Some(rename) = rename {
+            text_annotations
+                .add_line_annotation(Box::new(RenameLineAnnotation::new(rename.anchor_line)));
+        }
 
         if is_focused && config.cursorline {
             decorations.add_decoration(Self::cursorline(doc, view, theme));
@@ -293,6 +303,9 @@ impl EditorView {
                 cache: &editor.cursor_cache,
                 primary_cursor,
             });
+        }
+        if let Some(rename) = rename {
+            decorations.add_decoration(RenameDecoration::new(rename, &editor.cursor_cache, theme));
         }
         let width = view.inner_width(doc);
         let config = doc.config.load();
