@@ -9,8 +9,8 @@ use crate::{
         document::{render_document, LinePos, TextRenderer},
         statusline,
         text_decorations::{self, Decoration, DecorationManager, InlineDiagnostics},
-        ChangesSidebar, Completion, ExplorerSidebar, GitStatus, ProgressSpinners, RenameDecoration,
-        RenameLineAnnotation,
+        ChangesSidebar, Completion, ExplorerSidebar, GitStatus, NavKeys, ProgressSpinners,
+        RenameDecoration, RenameLineAnnotation,
     },
 };
 
@@ -137,7 +137,8 @@ impl EditorView {
         }
 
         let result = if self.explorer.is_focused() {
-            self.explorer.handle_key(key, context.editor)
+            let nav = self.sidebar_nav_keys();
+            self.explorer.handle_key(key, context.editor, &nav)
         } else {
             self.changes.handle_key(key, context.editor)
         };
@@ -145,6 +146,14 @@ impl EditorView {
         match result {
             EventResult::Ignored(_) => None,
             consumed => Some(consumed),
+        }
+    }
+
+    fn sidebar_nav_keys(&self) -> NavKeys {
+        let map = self.keymaps.map();
+        match map.get(&Mode::Normal) {
+            Some(trie) => NavKeys::from_reverse(&trie.reverse_map()),
+            None => NavKeys::default(),
         }
     }
 

@@ -76,6 +76,8 @@ Inside a sidebar:
 | Default key     | Action                                   |
 | --------------- | ---------------------------------------- |
 | `j` / `k`       | Move up / down                           |
+| `gg` / `ge`     | Go to first / last entry                 |
+| `Ctrl-d` / `Ctrl-u` | Scroll half a page down / up         |
 | `l` / `Enter`   | Expand folder or open file               |
 | `h`             | Collapse / go to parent                  |
 | `a` / `r` / `d` | Create / rename / delete (file explorer) |
@@ -88,6 +90,8 @@ Inside a sidebar:
 | `q` / `Esc`     | Return focus to the editor               |
 
 `Space` and `:` still work while a sidebar is focused, so you can switch between sidebars or run any command without leaving.
+
+The navigation keys (`gg`, `ge`, `Ctrl-d`, `Ctrl-u`) reuse your editor keymap, so rebinding `goto_file_start`, `goto_last_line`, `page_cursor_half_down`, or `page_cursor_half_up` updates the sidebar too.
 
 The action keys inside each sidebar are configurable from your `config.toml` (defaults shown):
 

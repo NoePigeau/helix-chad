@@ -15,7 +15,7 @@ use tui::buffer::Buffer as Surface;
 
 use crate::compositor::{Callback, Compositor, Context, EventResult};
 use crate::job;
-use crate::ui::sidebar::{self, GitStatus, SidebarState};
+use crate::ui::sidebar::{self, GitStatus, NavKeys, SidebarState};
 use crate::ui::{completers, icons, EditorView, Prompt, PromptEvent};
 
 const LEFT_PADDING: u16 = 1;
@@ -326,7 +326,16 @@ impl ExplorerSidebar {
         }
     }
 
-    pub fn handle_key(&mut self, event: KeyEvent, editor: &mut Editor) -> EventResult {
+    pub fn handle_key(
+        &mut self,
+        event: KeyEvent,
+        editor: &mut Editor,
+        nav: &NavKeys,
+    ) -> EventResult {
+        if self.state.handle_nav(event, nav, self.nodes.len()) {
+            return EventResult::Consumed(None);
+        }
+
         if event.modifiers.contains(KeyModifiers::CONTROL) {
             return EventResult::Ignored(None);
         }

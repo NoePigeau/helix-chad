@@ -36,7 +36,7 @@ pub use popup::Popup;
 pub use prompt::{Prompt, PromptEvent};
 pub use rename::{RenameDecoration, RenameLineAnnotation, RenamePrompt};
 pub use select::Select;
-pub(crate) use sidebar::GitStatus;
+pub(crate) use sidebar::{GitStatus, NavKeys};
 pub use spinner::{ProgressSpinners, Spinner};
 pub use text::Text;
 
