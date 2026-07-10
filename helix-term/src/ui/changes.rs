@@ -85,12 +85,14 @@ struct RowStyles {
 impl RowStyles {
     fn from_theme(theme: &Theme, focused: bool) -> Self {
         let text = theme.get("ui.text");
+        let mut dir = theme.get("ui.text.focus");
+        dir.bg = None;
 
         Self {
-            dir: theme.get("ui.text.focus"),
+            dir,
             header: text.add_modifier(Modifier::BOLD),
             selected: if focused {
-                theme.get("ui.menu.selected")
+                theme.get("ui.selection")
             } else {
                 theme.get("ui.cursorline.primary")
             },
@@ -441,9 +443,7 @@ impl ChangesSidebar {
 
         let selected = index == self.state.selected;
         let style = if selected {
-            let mut style = styles.selected;
-            style.fg = content_style.fg;
-            style
+            content_style.patch(styles.selected)
         } else {
             content_style
         };

@@ -1,4 +1,4 @@
-# Author : Noé Pigeau <noe@hubvisor.io>
+# Author : Noé Pigeau
 # Zed "One Light" ported to Helix
 # Colors taken verbatim from Zed's assets/themes/one/one.json ("One Light").
 # Semi-transparent Zed values were flattened over the editor bg (#fafafa),

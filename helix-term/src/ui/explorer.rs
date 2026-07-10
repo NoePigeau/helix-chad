@@ -47,16 +47,18 @@ struct NodeStyles {
 impl NodeStyles {
     fn from_theme(theme: &Theme, focused: bool) -> Self {
         let ignored_fg = Color::Rgb(0x9a, 0xa5, 0xb1);
+        let mut dir = theme.get("ui.text.focus");
+        dir.bg = None;
 
         Self {
             text: theme.get("ui.text"),
-            dir: theme.get("ui.text.focus"),
+            dir,
             ignored: Style::default()
                 .fg(ignored_fg)
                 .add_modifier(Modifier::ITALIC),
             ignored_fg,
             selected: if focused {
-                theme.get("ui.menu.selected")
+                theme.get("ui.selection")
             } else {
                 theme.get("ui.cursorline.primary")
             },
@@ -676,7 +678,7 @@ impl ExplorerSidebar {
         let content_style = node_content_style(node, git, styles, theme);
 
         let selected = index == self.state.selected;
-        let style = node_row_style(selected, node.ignored, git.is_some(), content_style, styles);
+        let style = node_row_style(selected, content_style, styles);
 
         if selected {
             surface.set_style(Rect::new(area.x, y, area.width, 1), styles.selected);
@@ -774,26 +776,12 @@ fn node_content_style(
     }
 }
 
-fn node_row_style(
-    selected: bool,
-    ignored: bool,
-    has_git: bool,
-    content_style: Style,
-    styles: &NodeStyles,
-) -> Style {
-    if !selected {
-        return content_style;
+fn node_row_style(selected: bool, content_style: Style, styles: &NodeStyles) -> Style {
+    if selected {
+        content_style.patch(styles.selected)
+    } else {
+        content_style
     }
-    if !ignored && !has_git {
-        return styles.selected;
-    }
-
-    let mut style = styles.selected;
-    style.fg = content_style.fg;
-    if ignored {
-        style = style.add_modifier(Modifier::ITALIC);
-    }
-    style
 }
 
 fn file_name(path: &Path) -> String {

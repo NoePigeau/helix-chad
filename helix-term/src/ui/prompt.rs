@@ -844,7 +844,8 @@ impl Prompt {
         }
 
         let popup = Rect::new(input_box.x, top, input_box.width, rows + 2).intersection(area);
-        surface.clear_with(popup, style.background);
+        let text_style = style.background.patch(cx.editor.theme.get("ui.text"));
+        surface.clear_with(popup, text_style);
 
         let block = rounded_block(style);
         let inner = block.inner(popup).inner(Margin::horizontal(1));

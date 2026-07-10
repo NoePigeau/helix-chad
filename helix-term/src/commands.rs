@@ -6,11 +6,11 @@ pub(crate) mod typed;
 pub use dap::*;
 use futures_util::FutureExt;
 use helix_event::status;
+use helix_loader::workspace_trust::TrustQuery;
 use helix_stdx::{
     path::{self, find_paths},
     rope::{self, RopeSliceExt},
 };
-use helix_loader::workspace_trust::TrustQuery;
 use helix_vcs::{forge, DiffProviderRegistry, FileChange, Hunk, LineBlame};
 pub use lsp::*;
 pub use syntax::*;
@@ -3323,8 +3323,10 @@ fn resolve_blame_url(
     match kind {
         BlameUrl::Commit => forge::commit_url(&remote, &blame.commit)
             .ok_or("Unsupported git remote url for the commit link"),
-        BlameUrl::PullRequest => resolve_pull_request_url(diff_providers, path, trust_full, &remote, &blame)
-            .ok_or("No pull request found for the blamed commit"),
+        BlameUrl::PullRequest => {
+            resolve_pull_request_url(diff_providers, path, trust_full, &remote, &blame)
+                .ok_or("No pull request found for the blamed commit")
+        }
     }
 }
 
