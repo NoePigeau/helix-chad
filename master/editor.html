@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "colibri";
             const default_dark_theme = "colibri";
-            window.path_to_searchindex_js = "searchindex-28224a4d.js";
+            window.path_to_searchindex_js = "searchindex-3a374221.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-c2fa7ea4.js"></script>
@@ -209,6 +209,7 @@
 <li><a href="#editorsoft-wrap-section"><code>[editor.soft-wrap]</code> Section</a></li>
 <li><a href="#editorsmart-tab-section"><code>[editor.smart-tab]</code> Section</a></li>
 <li><a href="#editorinline-diagnostics-section"><code>[editor.inline-diagnostics]</code> Section</a></li>
+<li><a href="#editorinline-blame-section"><code>[editor.inline-blame]</code> Section</a></li>
 <li><a href="#editorword-completion-section"><code>[editor.word-completion]</code> Section</a></li>
 <li><a href="#editorworkspace-trust-section"><code>[editor.workspace-trust]</code> Section</a></li>
 </ul>
@@ -696,6 +697,32 @@ S-tab = "extend_parent_node_start"
             └─ no such value in this scope
 }
 </code></pre>
+<h3 id="editorinline-blame-section"><a class="header" href="#editorinline-blame-section"><code>[editor.inline-blame]</code> Section</a></h3>
+<p>Options for the inline git blame annotation, rendered at the end of the line
+that contains the primary cursor:</p>
+<pre><code class="language-text">fn main() {      Jane Doe, 3 weeks ago • initial commit
+</code></pre>
+<p>Lines with uncommitted changes show no annotation. The blame is refreshed when
+a document is opened or saved.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Description</th><th>Default</th></tr>
+</thead>
+<tbody>
+<tr><td><code>enable</code></td><td>Whether to show the blame annotation</td><td><code>false</code></td></tr>
+<tr><td><code>format</code></td><td>Format of the annotation. Supports the <code>{author}</code>, <code>{time-ago}</code>, <code>{message}</code> and <code>{commit}</code> placeholders</td><td><code>"{author}, {time-ago} • {message}"</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Example:</p>
+<pre><code class="language-toml">[editor.inline-blame]
+enable = true
+format = "{author}, {time-ago} • {message} • {commit}"
+</code></pre>
+<p>It can be toggled at runtime with <code>:toggle inline-blame.enable</code>. The annotation
+is styled with the <code>ui.virtual.inline-blame</code> theme key, falling back to a grey
+foreground (<code>#7A818A</code>) when the theme does not define it.</p>
 <h3 id="editorword-completion-section"><a class="header" href="#editorword-completion-section"><code>[editor.word-completion]</code> Section</a></h3>
 <p>Options for controlling completion of words from open buffers.</p>
 <div class="table-wrapper">
