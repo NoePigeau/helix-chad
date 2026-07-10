@@ -12,8 +12,11 @@ use std::{
 #[cfg(feature = "git")]
 mod git;
 
+mod blame;
 mod diff;
+pub mod forge;
 
+pub use blame::{FileBlame, LineBlame};
 pub use diff::{DiffHandle, Hunk};
 
 mod status;
@@ -38,6 +41,50 @@ impl DiffProviderRegistry {
                 Err(err) => {
                     log::debug!("{err:#?}");
                     log::debug!("failed to open diff base for {}", file.display());
+                    None
+                }
+            })
+    }
+
+    pub fn blame_file(&self, file: &Path, trust_full: bool) -> Option<FileBlame> {
+        self.providers
+            .iter()
+            .find_map(|provider| match provider.blame_file(file, trust_full) {
+                Ok(res) => Some(res),
+                Err(err) => {
+                    log::debug!("{err:#?}");
+                    log::debug!("failed to blame {}", file.display());
+                    None
+                }
+            })
+    }
+
+    pub fn get_merge_message(
+        &self,
+        file: &Path,
+        trust_full: bool,
+        commit: &str,
+    ) -> Option<String> {
+        self.providers.iter().find_map(|provider| {
+            match provider.get_merge_message(file, trust_full, commit) {
+                Ok(res) => res,
+                Err(err) => {
+                    log::debug!("{err:#?}");
+                    log::debug!("failed to find merge commit for {}", file.display());
+                    None
+                }
+            }
+        })
+    }
+
+    pub fn get_remote_url(&self, file: &Path, trust_full: bool) -> Option<String> {
+        self.providers
+            .iter()
+            .find_map(|provider| match provider.get_remote_url(file, trust_full) {
+                Ok(res) => Some(res),
+                Err(err) => {
+                    log::debug!("{err:#?}");
+                    log::debug!("failed to get remote url for {}", file.display());
                     None
                 }
             })
@@ -138,6 +185,35 @@ impl DiffProvider {
         match self {
             #[cfg(feature = "git")]
             Self::Git => git::get_diff_base(file, trust_full),
+            Self::None => bail!("No diff support compiled in"),
+        }
+    }
+
+    fn blame_file(&self, file: &Path, trust_full: bool) -> Result<FileBlame> {
+        match self {
+            #[cfg(feature = "git")]
+            Self::Git => git::blame_file(file, trust_full),
+            Self::None => bail!("No diff support compiled in"),
+        }
+    }
+
+    fn get_merge_message(
+        &self,
+        file: &Path,
+        trust_full: bool,
+        commit: &str,
+    ) -> Result<Option<String>> {
+        match self {
+            #[cfg(feature = "git")]
+            Self::Git => git::merge_message(file, trust_full, commit),
+            Self::None => bail!("No diff support compiled in"),
+        }
+    }
+
+    fn get_remote_url(&self, file: &Path, trust_full: bool) -> Result<String> {
+        match self {
+            #[cfg(feature = "git")]
+            Self::Git => git::remote_url(file, trust_full),
             Self::None => bail!("No diff support compiled in"),
         }
     }

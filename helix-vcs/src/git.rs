@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use arc_swap::ArcSwap;
 use gix::filter::plumbing::driver::apply::Delay;
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
@@ -9,6 +10,7 @@ use gix::bstr::ByteSlice;
 use gix::diff::Rewrites;
 use gix::dir::entry::Status;
 use gix::objs::tree::EntryKind;
+use gix::repository::blame_file::Options as BlameOptions;
 use gix::sec::trust::DefaultForLevel;
 use gix::status::{
     index_worktree::Item,
@@ -17,7 +19,8 @@ use gix::status::{
 };
 use gix::{Commit, ObjectId, Repository, ThreadSafeRepository};
 
-use crate::{FileChange, WorkingTreeStatus};
+use crate::blame::BlameHunk;
+use crate::{FileBlame, FileChange, LineBlame, WorkingTreeStatus};
 
 #[cfg(test)]
 mod test;
@@ -63,6 +66,143 @@ pub fn get_diff_base(file: &Path, trust_full: bool) -> Result<Vec<u8>> {
     } else {
         Ok(data)
     }
+}
+
+pub fn blame_file(file: &Path, trust_full: bool) -> Result<FileBlame> {
+    debug_assert!(!file.exists() || file.is_file());
+    debug_assert!(file.is_absolute());
+    let file = gix::path::realpath(file).context("resolve symlinks")?;
+
+    let repo_dir = get_repo_dir(&file)?;
+    let repo = open_repo(repo_dir, trust_full)
+        .context("failed to open git repo")?
+        .to_thread_local();
+    let head = repo.head_commit()?;
+
+    let work_dir = repo.workdir().context("repo has no worktree")?;
+    let rela_path = file.strip_prefix(work_dir)?;
+    let rela_path = gix::path::try_into_bstr(rela_path)?;
+
+    let outcome = repo.blame_file(rela_path.as_ref(), head.id, BlameOptions::default())?;
+    file_blame_from_outcome(&repo, outcome)
+}
+
+fn file_blame_from_outcome(repo: &Repository, outcome: gix::blame::Outcome) -> Result<FileBlame> {
+    let mut blames_by_commit = HashMap::new();
+    let mut hunks = Vec::with_capacity(outcome.entries.len());
+
+    for entry in outcome.entries {
+        let blame = match blames_by_commit.get(&entry.commit_id) {
+            Some(blame) => Arc::clone(blame),
+            None => {
+                let blame = Arc::new(line_blame_for_commit(repo, entry.commit_id)?);
+                blames_by_commit.insert(entry.commit_id, Arc::clone(&blame));
+                blame
+            }
+        };
+        let start = entry.start_in_blamed_file;
+        hunks.push(BlameHunk::new(start..start + entry.len.get(), blame));
+    }
+
+    Ok(FileBlame::new(hunks))
+}
+
+fn line_blame_for_commit(repo: &Repository, commit_id: ObjectId) -> Result<LineBlame> {
+    let commit = repo.find_commit(commit_id)?;
+    let author = commit.author()?;
+
+    Ok(LineBlame {
+        commit: commit_id.to_string(),
+        author: author.name.to_string(),
+        timestamp: author.seconds(),
+        message: commit.message()?.summary().to_string(),
+    })
+}
+
+const MERGE_LOOKUP_TIME_SLACK_SECONDS: i64 = 60 * 60 * 24;
+
+pub fn merge_message(file: &Path, trust_full: bool, commit: &str) -> Result<Option<String>> {
+    debug_assert!(!file.exists() || file.is_file());
+    debug_assert!(file.is_absolute());
+    let file = gix::path::realpath(file).context("resolve symlinks")?;
+
+    let repo_dir = get_repo_dir(&file)?;
+    let repo = open_repo(repo_dir, trust_full)
+        .context("failed to open git repo")?
+        .to_thread_local();
+    let commit_id = ObjectId::from_hex(commit.as_bytes())?;
+
+    match find_merging_commit(&repo, commit_id)? {
+        Some(merge_id) => Ok(Some(repo.find_commit(merge_id)?.message_raw()?.to_string())),
+        None => Ok(None),
+    }
+}
+
+fn find_merging_commit(repo: &Repository, target: ObjectId) -> Result<Option<ObjectId>> {
+    let cutoff = repo.find_commit(target)?.time()?.seconds - MERGE_LOOKUP_TIME_SLACK_SECONDS;
+
+    let mut first_parent_chain = Vec::new();
+    let walk = repo
+        .rev_walk([repo.head_commit()?.id])
+        .first_parent_only()
+        .sorting(gix::revision::walk::Sorting::ByCommitTimeCutoff {
+            order: Default::default(),
+            seconds: cutoff,
+        })
+        .all()?;
+    for info in walk {
+        let info = info?;
+        if info.id == target {
+            return Ok(None);
+        }
+        first_parent_chain.push(info.id);
+    }
+
+    let Some(&head) = first_parent_chain.first() else {
+        return Ok(None);
+    };
+    if !is_ancestor(repo, target, head) {
+        return Ok(None);
+    }
+
+    let (mut newest, mut oldest) = (0, first_parent_chain.len() - 1);
+    while newest < oldest {
+        let middle = (newest + oldest + 1) / 2;
+        if is_ancestor(repo, target, first_parent_chain[middle]) {
+            newest = middle;
+        } else {
+            oldest = middle - 1;
+        }
+    }
+
+    let merge_id = first_parent_chain[newest];
+    let is_merge = repo.find_commit(merge_id)?.parent_ids().count() > 1;
+    Ok(is_merge.then_some(merge_id))
+}
+
+fn is_ancestor(repo: &Repository, ancestor: ObjectId, descendant: ObjectId) -> bool {
+    repo.merge_base(ancestor, descendant)
+        .map(|base| base.detach() == ancestor)
+        .unwrap_or(false)
+}
+
+pub fn remote_url(file: &Path, trust_full: bool) -> Result<String> {
+    debug_assert!(!file.exists() || file.is_file());
+    debug_assert!(file.is_absolute());
+    let file = gix::path::realpath(file).context("resolve symlinks")?;
+
+    let repo_dir = get_repo_dir(&file)?;
+    let repo = open_repo(repo_dir, trust_full)
+        .context("failed to open git repo")?
+        .to_thread_local();
+    let remote = repo
+        .find_default_remote(gix::remote::Direction::Fetch)
+        .context("no default remote")??;
+    let url = remote
+        .url(gix::remote::Direction::Fetch)
+        .context("remote has no url")?;
+
+    Ok(url.to_bstring().to_string())
 }
 
 pub fn get_current_head_name(file: &Path, trust_full: bool) -> Result<Arc<ArcSwap<Box<str>>>> {

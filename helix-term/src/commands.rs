@@ -10,7 +10,8 @@ use helix_stdx::{
     path::{self, find_paths},
     rope::{self, RopeSliceExt},
 };
-use helix_vcs::{FileChange, Hunk};
+use helix_loader::workspace_trust::TrustQuery;
+use helix_vcs::{forge, DiffProviderRegistry, FileChange, Hunk, LineBlame};
 pub use lsp::*;
 pub use syntax::*;
 use tui::{
@@ -411,6 +412,8 @@ impl MappableCommand {
         focus_changes_sidebar, "Focus git changes sidebar",
         widen_sidebar, "Widen the focused sidebar",
         narrow_sidebar, "Narrow the focused sidebar",
+        copy_blame_commit_url, "Copy the URL of the commit that last changed the current line",
+        copy_blame_pull_request_url, "Copy the URL of the pull request that introduced the commit of the current line",
         code_action, "Perform code action",
         buffer_picker, "Open buffer picker",
         jumplist_picker, "Open jumplist picker",
@@ -3240,6 +3243,120 @@ fn narrow_sidebar(cx: &mut Context) {
             editor_view.narrow_sidebar();
         }
     }));
+}
+
+#[derive(Copy, Clone)]
+enum BlameUrl {
+    Commit,
+    PullRequest,
+}
+
+fn copy_blame_commit_url(cx: &mut Context) {
+    copy_blame_url(cx, BlameUrl::Commit);
+}
+
+fn copy_blame_pull_request_url(cx: &mut Context) {
+    copy_blame_url(cx, BlameUrl::PullRequest);
+}
+
+fn copy_blame_url(cx: &mut Context, kind: BlameUrl) {
+    let (view, doc) = current_ref!(cx.editor);
+    let cursor = doc
+        .selection(view.id)
+        .primary()
+        .cursor(doc.text().slice(..));
+    let line = doc.text().char_to_line(cursor) as u32;
+    let base_line = doc
+        .diff_handle()
+        .and_then(|handle| handle.load().base_line(line));
+    let cached_blame = doc.blame_for_line(line).cloned();
+    let path = doc.path().map(|path| path.to_path_buf());
+    let trust_full = cx
+        .editor
+        .workspace_trust
+        .query(doc.workspace_root(), TrustQuery::Git)
+        .is_trusted();
+    let diff_providers = cx.editor.diff_providers.clone();
+
+    let Some(path) = path else {
+        cx.editor.set_error("Document has no path");
+        return;
+    };
+
+    tokio::task::spawn_blocking(move || {
+        let url = resolve_blame_url(
+            &diff_providers,
+            &path,
+            trust_full,
+            kind,
+            base_line,
+            cached_blame,
+        );
+        job::dispatch_blocking(move |editor, _compositor| match url {
+            Ok(url) => match editor.registers.write('+', vec![url.clone()]) {
+                Ok(()) => editor.set_status(format!("yanked {url} to register +")),
+                Err(err) => editor.set_error(err.to_string()),
+            },
+            Err(err) => editor.set_error(err),
+        });
+    });
+}
+
+fn resolve_blame_url(
+    diff_providers: &DiffProviderRegistry,
+    path: &Path,
+    trust_full: bool,
+    kind: BlameUrl,
+    base_line: Option<u32>,
+    cached_blame: Option<LineBlame>,
+) -> Result<String, &'static str> {
+    let remote = diff_providers
+        .get_remote_url(path, trust_full)
+        .ok_or("No git remote found for the current document")?;
+    let blame = cached_blame
+        .or_else(|| {
+            let file_blame = diff_providers.blame_file(path, trust_full)?;
+            file_blame.blame_for_line(base_line?).cloned()
+        })
+        .ok_or("No blame information for the current line")?;
+
+    match kind {
+        BlameUrl::Commit => forge::commit_url(&remote, &blame.commit)
+            .ok_or("Unsupported git remote url for the commit link"),
+        BlameUrl::PullRequest => resolve_pull_request_url(diff_providers, path, trust_full, &remote, &blame)
+            .ok_or("No pull request found for the blamed commit"),
+    }
+}
+
+fn resolve_pull_request_url(
+    diff_providers: &DiffProviderRegistry,
+    path: &Path,
+    trust_full: bool,
+    remote: &str,
+    blame: &LineBlame,
+) -> Option<String> {
+    if let Some(url) = github_pull_request_url(remote, &blame.commit) {
+        return Some(url);
+    }
+    let number = forge::pull_request_number(&blame.message).or_else(|| {
+        let message = diff_providers.get_merge_message(path, trust_full, &blame.commit)?;
+        forge::pull_request_number(&message)
+    })?;
+    forge::pull_request_url(remote, number)
+}
+
+fn github_pull_request_url(remote: &str, commit: &str) -> Option<String> {
+    let (host, repo) = forge::github_repo(remote)?;
+    let output = std::process::Command::new("gh")
+        .args(["api", &format!("repos/{repo}/commits/{commit}/pulls")])
+        .env("GH_HOST", host)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let pulls: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    Some(pulls.get(0)?.get("html_url")?.as_str()?.to_owned())
 }
 
 fn file_picker_in_current_buffer_directory(cx: &mut Context) {

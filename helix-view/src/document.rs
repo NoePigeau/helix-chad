@@ -15,7 +15,7 @@ use helix_core::text_annotations::{InlineAnnotation, Overlay};
 use helix_event::TaskController;
 use helix_lsp::util::lsp_pos_to_pos;
 use helix_stdx::faccess::{copy_metadata, readonly};
-use helix_vcs::{DiffHandle, DiffProviderRegistry};
+use helix_vcs::{DiffHandle, DiffProviderRegistry, FileBlame, LineBlame};
 use once_cell::sync::OnceCell;
 use thiserror;
 
@@ -208,6 +208,7 @@ pub struct Document {
 
     diff_handle: Option<DiffHandle>,
     version_control_head: Option<Arc<ArcSwap<Box<str>>>>,
+    pub blame: Option<FileBlame>,
 
     // when document was used for most-recent-used buffer picker
     pub focused_at: std::time::Instant,
@@ -760,6 +761,7 @@ impl Document {
             modified_since_accessed: false,
             language_servers: HashMap::new(),
             diff_handle: None,
+            blame: None,
             config,
             version_control_head: None,
             focused_at: std::time::Instant::now(),
@@ -2000,6 +2002,16 @@ impl Document {
         } else {
             self.diff_handle = None;
         }
+    }
+
+    pub fn blame_for_line(&self, line: u32) -> Option<&LineBlame> {
+        let blame = self.blame.as_ref()?;
+        let base_line = self.diff_handle.as_ref()?.load().base_line(line)?;
+        blame.blame_for_line(base_line)
+    }
+
+    pub fn line_blame(&self, line: u32, format: &str) -> Option<String> {
+        Some(self.blame_for_line(line)?.format(format))
     }
 
     pub fn version_control_head(&self) -> Option<Arc<Box<str>>> {

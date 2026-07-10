@@ -436,6 +436,27 @@ pub struct Config {
     pub workspace_trust: WorkspaceTrustConfig,
     /// Keybindings for the file explorer / git changes sidebars.
     pub sidebar: SidebarConfig,
+    /// Inline git blame annotation for the line under the primary cursor.
+    pub inline_blame: InlineBlameConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct InlineBlameConfig {
+    /// Whether to show the blame annotation. Defaults to `false`.
+    pub enable: bool,
+    /// Format of the annotation. Supports the `{author}`, `{time-ago}`,
+    /// `{message}` and `{commit}` placeholders.
+    pub format: String,
+}
+
+impl Default for InlineBlameConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            format: "{author}, {time-ago} • {message}".into(),
+        }
+    }
 }
 
 /// Action keys for the file explorer and git changes sidebars (`[editor.sidebar]`).
@@ -1336,6 +1357,7 @@ impl Default for Config {
             buffer_picker: BufferPickerConfig::default(),
             workspace_trust: WorkspaceTrustConfig::default(),
             sidebar: SidebarConfig::default(),
+            inline_blame: InlineBlameConfig::default(),
         }
     }
 }

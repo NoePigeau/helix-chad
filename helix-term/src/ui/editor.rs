@@ -8,7 +8,7 @@ use crate::{
     ui::{
         document::{render_document, LinePos, TextRenderer},
         statusline,
-        text_decorations::{self, Decoration, DecorationManager, InlineDiagnostics},
+        text_decorations::{self, Decoration, DecorationManager, InlineBlame, InlineDiagnostics},
         ChangesSidebar, Completion, ExplorerSidebar, GitStatus, NavKeys, ProgressSpinners,
         RenameDecoration, RenameLineAnnotation,
     },
@@ -322,6 +322,12 @@ impl EditorView {
             .diagnostics_handler
             .show_cursorline_diagnostics(doc, view.id);
         let inline_diagnostic_config = config.inline_diagnostics.prepare(width, enable_cursor_line);
+        if is_focused && config.inline_blame.enable {
+            let cursor_line = doc.text().char_to_line(primary_cursor);
+            if let Some(blame) = doc.line_blame(cursor_line as u32, &config.inline_blame.format) {
+                decorations.add_decoration(InlineBlame::new(theme, cursor_line, blame));
+            }
+        }
         decorations.add_decoration(InlineDiagnostics::new(
             doc,
             theme,

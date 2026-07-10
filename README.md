@@ -43,11 +43,36 @@ A Zed style list of changed files.
 | Modified | `version_control.modified` | `#D3B020` |
 | Deleted  | `version_control.deleted`  | `#E06C76` |
 
+### Inline git blame
+
+A VSCode / Zed style blame annotation at the end of the line under the cursor.
+
+- Shows who last changed the line, when, and the commit message: `Noé Pigeau, 2 weeks ago • feat: Update read me`.
+- Hidden on lines with uncommitted changes.
+- Computed in the background and refreshed when a document is opened or saved.
+- Disabled by default — enable it from your `config.toml`, or toggle it at runtime with `:toggle inline-blame.enable`.
+- The format is configurable with the `{author}`, `{time-ago}`, `{message}` and `{commit}` placeholders.
+- Themeable through the `ui.virtual.inline-blame` key, falling back to a grey foreground (`#7A818A`).
+- `Space B c` copies the URL of the commit that last changed the current line, and `Space B p` the URL of the pull request that introduced it. Both work on GitHub, GitLab and Bitbucket remotes, follow the blame of the line under the cursor, and don't require the annotation to be enabled.
+- The pull request is resolved through the [`gh` CLI](https://cli.github.com/) when available (covers squash, merge and rebase merges, and links to the right repo for commits coming from a fork's upstream), and falls back to the `#123` / `!123` references found in the commit or merge-commit message.
+
+```toml
+[editor.inline-blame]
+enable = true
+format = "{author}, {time-ago} • {message}"
+```
+
+```toml
+# in your theme
+"ui.virtual.inline-blame" = { fg = "#7A818A", modifiers = ["italic"] }
+```
+
 ### Polished UI
 
 - Floating, rounded search box for `/`.
 - Command line (`:`) as a floating box with completion and documentation popups.
 - Pickers with rounded borders and centered titles.
+- Improved UI for Rename symbol
 - Extra theme: `zed_one_light_v2`.
 
 ## Keybindings
@@ -59,6 +84,8 @@ A Zed style list of changed files.
 | `Space g`   | Focus the git changes sidebar                                                     | `focus_changes_sidebar` |
 | `Ctrl-→`    | Widen the focused sidebar                                                         | `widen_sidebar`         |
 | `Ctrl-←`    | Narrow the focused sidebar                                                        | `narrow_sidebar`        |
+| `Space B c` | Copy the URL of the commit that last changed the current line                     | `copy_blame_commit_url` |
+| `Space B p` | Copy the URL of the pull request that introduced the commit of the current line  | `copy_blame_pull_request_url` |
 
 These are regular defaults — rebind any of them from your `config.toml` using the command name:
 

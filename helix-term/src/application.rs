@@ -12,6 +12,7 @@ use helix_view::{
     document::{DocumentOpenError, DocumentSavedEventResult},
     editor::{ConfigEvent, EditorEvent},
     graphics::Rect,
+    handlers::BlameEvent,
     theme,
     tree::Layout,
     Align, Editor,
@@ -616,6 +617,11 @@ impl Application {
         );
 
         doc.set_last_saved_revision(doc_save_event.revision, doc_save_event.save_time);
+
+        helix_event::send_blocking(
+            &self.editor.handlers.blame,
+            BlameEvent(doc_save_event.doc_id),
+        );
 
         let lines = doc_save_event.text.len_lines();
         let size = doc_save_event.text.len_bytes();

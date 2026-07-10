@@ -195,3 +195,95 @@ fn symlink_to_git_repo() {
     assert_eq!(git::get_diff_base(&file_link, true).unwrap(), contents);
     assert_eq!(git::get_diff_base(&file, true).unwrap(), contents);
 }
+
+#[test]
+fn blame_file_maps_lines_to_commits() {
+    let temp_git = empty_git_repo();
+    let file = temp_git.path().join("file.txt");
+    File::create(&file)
+        .unwrap()
+        .write_all(b"line one\nline two\n")
+        .unwrap();
+    exec_git_cmd("add -A", temp_git.path());
+    exec_git_cmd("commit -m first", temp_git.path());
+    File::create(&file)
+        .unwrap()
+        .write_all(b"line one\nline two\nline three\n")
+        .unwrap();
+    exec_git_cmd("add -A", temp_git.path());
+    exec_git_cmd("commit -m second", temp_git.path());
+
+    let blame = git::blame_file(&file, true).unwrap();
+
+    let first_line = blame.blame_for_line(0).unwrap();
+    assert_eq!(first_line.author, "author");
+    assert_eq!(first_line.message, "first");
+    let third_line = blame.blame_for_line(2).unwrap();
+    assert_eq!(third_line.message, "second");
+    assert!(blame.blame_for_line(3).is_none());
+}
+
+#[test]
+fn blame_file_fails_for_untracked_file() {
+    let temp_git = empty_git_repo();
+    let file = temp_git.path().join("file.txt");
+    File::create(&file).unwrap().write_all(b"foo\n").unwrap();
+    create_commit(temp_git.path(), true);
+
+    let untracked = temp_git.path().join("untracked.txt");
+    File::create(&untracked).unwrap().write_all(b"bar\n").unwrap();
+
+    assert!(git::blame_file(&untracked, true).is_err());
+}
+
+fn git_output(args: &str, git_dir: &Path) -> String {
+    let res = Command::new("git")
+        .arg("-C")
+        .arg(git_dir)
+        .args(args.split_whitespace())
+        .output()
+        .unwrap_or_else(|_| panic!("`git {args}` failed"));
+    String::from_utf8(res.stdout).unwrap().trim().to_owned()
+}
+
+#[test]
+fn merge_message_finds_the_merging_commit() {
+    let temp_git = empty_git_repo();
+    let repo = temp_git.path();
+    let file = repo.join("file.txt");
+    File::create(&file).unwrap().write_all(b"base\n").unwrap();
+    create_commit(repo, true);
+
+    exec_git_cmd("checkout -b feature", repo);
+    File::create(&file)
+        .unwrap()
+        .write_all(b"base\nfeature\n")
+        .unwrap();
+    exec_git_cmd("add -A", repo);
+    exec_git_cmd("commit -m feature-work", repo);
+    let feature_commit = git_output("rev-parse HEAD", repo);
+
+    exec_git_cmd("checkout main", repo);
+    exec_git_cmd("merge --no-ff feature -m Merged-PR-#7", repo);
+
+    let message = git::merge_message(&file, true, &feature_commit).unwrap();
+    assert_eq!(message.unwrap().trim(), "Merged-PR-#7");
+}
+
+#[test]
+fn merge_message_is_none_for_commits_on_the_main_line() {
+    let temp_git = empty_git_repo();
+    let repo = temp_git.path();
+    let file = repo.join("file.txt");
+    File::create(&file).unwrap().write_all(b"base\n").unwrap();
+    create_commit(repo, true);
+    let commit = git_output("rev-parse HEAD", repo);
+
+    File::create(&file)
+        .unwrap()
+        .write_all(b"base\nmore\n")
+        .unwrap();
+    create_commit(repo, true);
+
+    assert_eq!(git::merge_message(&file, true, &commit).unwrap(), None);
+}

@@ -238,6 +238,10 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "d" => diagnostics_picker,
             "D" => workspace_diagnostics_picker,
             "g" => focus_changes_sidebar,
+            "B" => { "Blame"
+                "c" => copy_blame_commit_url,
+                "p" => copy_blame_pull_request_url,
+            },
             "a" => code_action,
             "'" => last_picker,
             "G" => { "Debug (experimental)" sticky=true

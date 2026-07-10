@@ -154,6 +154,26 @@ impl Diff<'_> {
         self.inverted
     }
 
+    pub fn base_line(&self, line: u32) -> Option<u32> {
+        let mut base_line = i64::from(line);
+        for hunk in &self.diff.hunks {
+            let hunk = if self.inverted {
+                hunk.invert()
+            } else {
+                hunk.clone()
+            };
+            if hunk.after.start > line {
+                break;
+            }
+            if hunk.after.end > line {
+                return None;
+            }
+            base_line += i64::from(hunk.before.end - hunk.before.start)
+                - i64::from(hunk.after.end - hunk.after.start);
+        }
+        u32::try_from(base_line).ok()
+    }
+
     /// Returns the `Hunk` for the `n`th change in this file.
     /// if there is no `n`th change  `Hunk::NONE` is returned instead.
     pub fn nth_hunk(&self, n: u32) -> Hunk {

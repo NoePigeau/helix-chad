@@ -22,6 +22,7 @@
 - [`[editor.soft-wrap]` Section](#editorsoft-wrap-section)
 - [`[editor.smart-tab]` Section](#editorsmart-tab-section)
 - [`[editor.inline-diagnostics]` Section](#editorinline-diagnostics-section)
+- [`[editor.inline-blame]` Section](#editorinline-blame-section)
 - [`[editor.word-completion]` Section](#editorword-completion-section)
 - [`[editor.workspace-trust]` Section](#editorworkspace-trust-section)
 
@@ -519,6 +520,35 @@ fn main() {
             └─ no such value in this scope
 }
 ```
+
+### `[editor.inline-blame]` Section
+
+Options for the inline git blame annotation, rendered at the end of the line
+that contains the primary cursor:
+
+```text
+fn main() {      Jane Doe, 3 weeks ago • initial commit
+```
+
+Lines with uncommitted changes show no annotation. The blame is refreshed when
+a document is opened or saved.
+
+| Key      | Description                                                                                        | Default |
+| ---      | ---                                                                                                | ---     |
+| `enable` | Whether to show the blame annotation                                                               | `false` |
+| `format` | Format of the annotation. Supports the `{author}`, `{time-ago}`, `{message}` and `{commit}` placeholders | `"{author}, {time-ago} • {message}"` |
+
+Example:
+
+```toml
+[editor.inline-blame]
+enable = true
+format = "{author}, {time-ago} • {message} • {commit}"
+```
+
+It can be toggled at runtime with `:toggle inline-blame.enable`. The annotation
+is styled with the `ui.virtual.inline-blame` theme key, falling back to a grey
+foreground (`#7A818A`) when the theme does not define it.
 
 ### `[editor.word-completion]` Section
 
