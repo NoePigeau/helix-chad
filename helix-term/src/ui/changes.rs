@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 use std::process::{Command, ExitStatus};
@@ -21,23 +22,34 @@ use crate::job::{self, Job, Jobs};
 use crate::ui::sidebar::{self, GitStatus, SidebarState};
 use crate::ui::{completers, icons, EditorView, Prompt, PromptEvent};
 
+const CHECKBOX_WIDTH: u16 = 2;
+const CHECKBOX_GAP: u16 = 1;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Section {
+enum StageState {
+    Unstaged,
     Staged,
-    Unstaged(GitStatus),
+    Partial,
 }
 
-impl Section {
-    fn label(self, count: usize) -> String {
+impl StageState {
+    fn glyph(self) -> &'static str {
         match self {
-            Self::Staged => format!("Staged ({count})"),
-            Self::Unstaged(status) => format!("{} ({count})", status.label()),
+            Self::Unstaged => "\u{2610}",
+            Self::Staged => "\u{2611}",
+            Self::Partial => "\u{25a3}",
         }
     }
 
     fn is_staged(self) -> bool {
-        matches!(self, Self::Staged)
+        !matches!(self, Self::Unstaged)
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ChangeInfo {
+    status: GitStatus,
+    stage: StageState,
 }
 
 #[derive(Debug)]
@@ -46,13 +58,14 @@ struct Entry {
     path: PathBuf,
     is_dir: bool,
     status: GitStatus,
+    stage: StageState,
     expanded: bool,
     children: Vec<Entry>,
 }
 
 #[derive(Debug)]
 struct Group {
-    section: Section,
+    status: GitStatus,
     expanded: bool,
     count: usize,
     roots: Vec<Entry>,
@@ -70,8 +83,8 @@ struct Row {
     depth: usize,
     label: String,
     kind: RowKind,
-    section: Section,
     status: GitStatus,
+    stage: StageState,
     path: PathBuf,
     expanded: bool,
 }
@@ -155,79 +168,72 @@ impl ChangesSidebar {
             .working_tree_status(&self.root, trust_full)
             .unwrap_or_default();
 
-        let mut groups = self.build_groups(true, categorize(status.staged));
-        groups.extend(self.build_groups(false, categorize(status.unstaged)));
-        self.groups = groups;
+        let previous = self.rows.get(self.state.selected).map(|row| row.path.clone());
+
+        self.groups = self.build_groups(collect_changes(status.staged, status.unstaged));
 
         self.rebuild_rows();
 
-        if self.state.selected >= self.rows.len() {
-            self.state.selected = 0;
-        }
+        self.restore_selection(previous);
         self.state.scroll = 0;
     }
 
-    fn build_groups(&self, staged: bool, buckets: [Vec<PathBuf>; 3]) -> Vec<Group> {
-        let [added, modified, deleted] = buckets;
+    fn restore_selection(&mut self, path: Option<PathBuf>) {
+        let restored = path
+            .filter(|path| !path.as_os_str().is_empty())
+            .and_then(|path| self.rows.iter().position(|row| row.path == path));
 
-        if staged {
-            let count = added.len() + modified.len() + deleted.len();
-            if count == 0 {
-                return Vec::new();
-            }
-
-            let roots = self.build_roots(&[
-                (GitStatus::Added, added),
-                (GitStatus::Modified, modified),
-                (GitStatus::Deleted, deleted),
-            ]);
-
-            return vec![Group {
-                section: Section::Staged,
-                expanded: true,
-                count,
-                roots,
-            }];
+        match restored {
+            Some(index) => self.state.selected = index,
+            None => self.state.clamp_selection(self.rows.len()),
         }
-
-        [
-            (GitStatus::Added, added),
-            (GitStatus::Modified, modified),
-            (GitStatus::Deleted, deleted),
-        ]
-        .into_iter()
-        .filter(|(_, files)| !files.is_empty())
-        .map(|(status, files)| {
-            let count = files.len();
-            let roots = self.build_roots(&[(status, files)]);
-
-            Group {
-                section: Section::Unstaged(status),
-                expanded: true,
-                count,
-                roots,
-            }
-        })
-        .collect()
     }
 
-    fn build_roots(&self, groups: &[(GitStatus, Vec<PathBuf>)]) -> Vec<Entry> {
+    fn build_groups(&self, changes: HashMap<PathBuf, ChangeInfo>) -> Vec<Group> {
+        [GitStatus::Added, GitStatus::Modified, GitStatus::Deleted]
+            .into_iter()
+            .filter_map(|status| self.build_group(status, &changes))
+            .collect()
+    }
+
+    fn build_group(&self, status: GitStatus, changes: &HashMap<PathBuf, ChangeInfo>) -> Option<Group> {
+        let files: Vec<(PathBuf, StageState)> = changes
+            .iter()
+            .filter(|(_, info)| info.status == status)
+            .map(|(path, info)| (path.clone(), info.stage))
+            .collect();
+
+        if files.is_empty() {
+            return None;
+        }
+
+        let count = files.len();
+        let roots = self.build_roots(status, &files);
+
+        Some(Group {
+            status,
+            expanded: true,
+            count,
+            roots,
+        })
+    }
+
+    fn build_roots(&self, status: GitStatus, files: &[(PathBuf, StageState)]) -> Vec<Entry> {
         let mut roots: Vec<Entry> = Vec::new();
 
-        for (status, files) in groups {
-            for path in files {
-                if let Ok(rel) = path.strip_prefix(&self.root) {
-                    let components: Vec<&str> = rel
-                        .components()
-                        .filter_map(|c| c.as_os_str().to_str())
-                        .collect();
-                    insert_path(&mut roots, &self.root, &components, *status);
-                }
+        for (path, stage) in files {
+            if let Ok(rel) = path.strip_prefix(&self.root) {
+                let components: Vec<&str> = rel
+                    .components()
+                    .filter_map(|c| c.as_os_str().to_str())
+                    .collect();
+                insert_path(&mut roots, &self.root, &components, status, *stage);
             }
         }
 
         for entry in &mut roots {
             compress(entry);
+            aggregate_stage(entry);
         }
         sort_entries(&mut roots);
 
@@ -240,17 +246,17 @@ impl ChangesSidebar {
         for group in &self.groups {
             rows.push(Row {
                 depth: 0,
-                label: group.section.label(group.count),
+                label: format!("{} ({})", group.status.label(), group.count),
                 kind: RowKind::Group,
-                section: group.section,
-                status: GitStatus::Modified,
+                status: group.status,
+                stage: StageState::Unstaged,
                 path: PathBuf::new(),
                 expanded: group.expanded,
             });
 
             if group.expanded {
                 for entry in &group.roots {
-                    push_entry_rows(&mut rows, entry, 1, group.section);
+                    push_entry_rows(&mut rows, entry, 1);
                 }
             }
         }
@@ -258,22 +264,34 @@ impl ChangesSidebar {
         self.rows = rows;
     }
 
-    fn selected_file(&self) -> Option<&Row> {
+    fn selected_target(&self) -> Option<&Row> {
         self.rows
             .get(self.state.selected)
-            .filter(|row| matches!(row.kind, RowKind::File))
+            .filter(|row| matches!(row.kind, RowKind::File | RowKind::Dir))
     }
 
-    fn toggle_group(&mut self, section: Section) {
-        if let Some(group) = self.groups.iter_mut().find(|g| g.section == section) {
+    fn collect_target_files(&self, status: GitStatus, path: &Path) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+
+        if let Some(group) = self.groups.iter().find(|g| g.status == status) {
+            if let Some(entry) = find_entry(&group.roots, path) {
+                collect_leaves(entry, &mut files);
+            }
+        }
+
+        files
+    }
+
+    fn toggle_group(&mut self, status: GitStatus) {
+        if let Some(group) = self.groups.iter_mut().find(|g| g.status == status) {
             group.expanded = !group.expanded;
         }
         self.rebuild_rows();
         self.state.clamp_selection(self.rows.len());
     }
 
-    fn toggle_dir(&mut self, section: Section, path: &Path) {
-        if let Some(group) = self.groups.iter_mut().find(|g| g.section == section) {
+    fn toggle_dir(&mut self, status: GitStatus, path: &Path) {
+        if let Some(group) = self.groups.iter_mut().find(|g| g.status == status) {
             if let Some(entry) = find_entry_mut(&mut group.roots, path) {
                 entry.expanded = !entry.expanded;
             }
@@ -289,31 +307,19 @@ impl ChangesSidebar {
 
         match row.kind {
             RowKind::Group => {
-                self.toggle_group(row.section);
+                self.toggle_group(row.status);
                 EventResult::Consumed(None)
             }
             RowKind::Dir => {
-                let section = row.section;
+                let status = row.status;
                 let path = row.path.clone();
-                self.toggle_dir(section, &path);
+                self.toggle_dir(status, &path);
                 EventResult::Consumed(None)
             }
             RowKind::File => {
                 let path = row.path.clone();
                 self.state.unfocus();
-
-                let callback: Callback =
-                    Box::new(
-                        move |_compositor, cx| match cx.editor.open(&path, Action::Replace) {
-                            Ok(doc_id) => schedule_goto_first_change(cx.jobs, doc_id),
-                            Err(err) => cx.editor.set_error(format!(
-                                "Failed to open {}: {}",
-                                path.display(),
-                                err
-                            )),
-                        },
-                    );
-                EventResult::Consumed(Some(callback))
+                EventResult::Consumed(Some(open_file_callback(path)))
             }
         }
     }
@@ -326,26 +332,14 @@ impl ChangesSidebar {
         let keys = editor.config().sidebar.git_changes.clone();
 
         if event == keys.stage {
-            if let Some(row) = self.selected_file() {
-                return EventResult::Consumed(Some(Self::toggle_stage_prompt(
-                    self.root.clone(),
-                    row.path.clone(),
-                    row.section.is_staged(),
-                )));
-            }
+            self.toggle_stage(editor);
             return EventResult::Consumed(None);
         }
+
         if event == keys.discard {
-            if let Some(row) = self.selected_file() {
-                return EventResult::Consumed(Some(Self::discard_prompt(
-                    self.root.clone(),
-                    row.path.clone(),
-                    row.status,
-                    row.section.is_staged(),
-                )));
-            }
-            return EventResult::Consumed(None);
+            return EventResult::Consumed(self.discard_selection());
         }
+
         if event == keys.reload {
             self.refresh(editor);
             return EventResult::Consumed(None);
@@ -376,11 +370,11 @@ impl ChangesSidebar {
         }
 
         match row.kind {
-            RowKind::Group => self.toggle_group(row.section),
+            RowKind::Group => self.toggle_group(row.status),
             RowKind::Dir => {
-                let section = row.section;
+                let status = row.status;
                 let path = row.path.clone();
-                self.toggle_dir(section, &path);
+                self.toggle_dir(status, &path);
             }
             RowKind::File => {}
         }
@@ -388,29 +382,34 @@ impl ChangesSidebar {
 
     pub fn render(&mut self, area: Rect, surface: &mut Surface, editor: &Editor) {
         let theme = &editor.theme;
-        let background = theme.get("ui.background");
-        surface.set_style(area, background);
-
+        surface.set_style(area, theme.get("ui.background"));
         sidebar::draw_separator(area, surface, theme);
 
-        let inner = area.clip_right(1);
+        let panel = area.clip_right(1);
+        render_title(panel, surface, theme);
+
+        let inner = panel.clip_top(2);
         let height = inner.height as usize;
 
         if self.rows.is_empty() {
-            let text_style = theme.get("ui.text");
-            surface.set_stringn(
-                inner.x,
-                inner.y,
-                "No changes",
-                inner.width as usize,
-                text_style,
-            );
+            render_empty(inner, surface, theme);
             return;
         }
 
         self.state.adjust_scroll(height);
+        self.render_rows(inner, area, surface, theme, height);
+    }
 
+    fn render_rows(
+        &self,
+        inner: Rect,
+        area: Rect,
+        surface: &mut Surface,
+        theme: &Theme,
+        height: usize,
+    ) {
         let styles = RowStyles::from_theme(theme, self.state.is_focused());
+
         for (index, row) in self
             .rows
             .iter()
@@ -435,114 +434,101 @@ impl ChangesSidebar {
         theme: &Theme,
         styles: &RowStyles,
     ) {
+        let selected = index == self.state.selected;
+        let style = self.row_style(row, selected, theme, styles);
+
+        if selected {
+            surface.set_style(Rect::new(area.x, y, area.width, 1), styles.selected);
+        }
+
+        match row.kind {
+            RowKind::Group => render_group_row(row, y, inner, surface, style),
+            RowKind::Dir | RowKind::File => render_entry_row(row, y, inner, surface, style, styles),
+        }
+    }
+
+    fn row_style(&self, row: &Row, selected: bool, theme: &Theme, styles: &RowStyles) -> Style {
         let content_style = match row.kind {
             RowKind::Group => styles.header,
             RowKind::Dir => styles.dir,
             RowKind::File => row.status.style(theme),
         };
 
-        let selected = index == self.state.selected;
-        let style = if selected {
+        if selected {
             content_style.patch(styles.selected)
         } else {
             content_style
+        }
+    }
+
+    fn toggle_stage(&mut self, editor: &mut Editor) {
+        let Some(row) = self.selected_target() else {
+            return;
         };
 
-        if selected {
-            surface.set_style(Rect::new(area.x, y, area.width, 1), styles.selected);
-        }
+        let status = row.status;
+        let path = row.path.clone();
+        let fully_staged = matches!(row.stage, StageState::Staged);
 
-        let indent = "  ".repeat(row.depth);
-        if let RowKind::Group = row.kind {
-            let marker = if row.expanded {
-                "\u{25be} "
-            } else {
-                "\u{25b8} "
-            };
-            let line = format!("{indent}{marker}{}", row.label);
-            surface.set_stringn(inner.x, y, &line, inner.width as usize, style);
+        let files = self.collect_target_files(status, &path);
+        if files.is_empty() {
             return;
         }
 
-        let end = inner.x + inner.width;
-        let (x, _) = surface.set_stringn(inner.x, y, &indent, inner.width as usize, style);
-
-        let (icon, color) = if let RowKind::Dir = row.kind {
-            let (glyph, _) = icons::folder_icon(row.expanded);
-            (glyph, styles.dir.fg.unwrap_or(Color::Reset))
+        let args: &[&str] = if fully_staged {
+            &["restore", "--staged"]
         } else {
-            icons::file_icon(Path::new(&row.label))
+            &["add"]
         };
 
-        let glyph = format!("{icon} ");
-        let (x, _) = surface.set_stringn(
-            x,
-            y,
-            &glyph,
-            end.saturating_sub(x) as usize,
-            Style::default().fg(color),
-        );
-        surface.set_stringn(x, y, &row.label, end.saturating_sub(x) as usize, style);
+        match run_git(&self.root, args, &files) {
+            Ok(exit) if exit.success() => self.refresh(editor),
+            Ok(_) | Err(_) => editor.set_error(format!("git failed on {}", path.display())),
+        }
     }
 
-    fn toggle_stage_prompt(root: PathBuf, path: PathBuf, staged: bool) -> Callback {
-        Box::new(move |compositor: &mut Compositor, cx: &mut Context| {
-            let prefill = path.to_string_lossy().into_owned();
-            let prefix = if staged { "unstage:" } else { "stage:" };
+    fn discard_selection(&self) -> Option<Callback> {
+        let row = self.selected_target()?;
+        let status = row.status;
+        let path = row.path.clone();
+        let staged = row.stage.is_staged();
 
-            let prompt = Prompt::new(
-                prefix.into(),
-                None,
-                completers::filename,
-                move |cx: &mut Context, input: &str, event: PromptEvent| {
-                    if event != PromptEvent::Validate {
-                        return;
-                    }
-                    let input = input.trim();
-                    if input.is_empty() {
-                        return;
-                    }
+        let files = self.collect_target_files(status, &path);
+        if files.is_empty() {
+            return None;
+        }
 
-                    let path = PathBuf::from(input);
-                    let args: &[&str] = if staged {
-                        &["restore", "--staged"]
-                    } else {
-                        &["add"]
-                    };
-                    match run_git(&root, args, &path) {
-                        Ok(status) if status.success() => schedule_post_git(None),
-                        Ok(_) | Err(_) => cx
-                            .editor
-                            .set_error(format!("git failed on {}", path.display())),
-                    }
-                },
-            )
-            .with_line(prefill, cx.editor);
-
-            compositor.push(Box::new(prompt));
-        })
+        Some(Self::discard_prompt(
+            self.root.clone(),
+            path,
+            files,
+            status,
+            staged,
+        ))
     }
 
-    fn discard_prompt(root: PathBuf, path: PathBuf, status: GitStatus, staged: bool) -> Callback {
+    fn discard_prompt(
+        root: PathBuf,
+        path: PathBuf,
+        files: Vec<PathBuf>,
+        status: GitStatus,
+        staged: bool,
+    ) -> Callback {
         Box::new(move |compositor: &mut Compositor, cx: &mut Context| {
             let prefill = path.to_string_lossy().into_owned();
 
             let prompt = Prompt::new(
-                "discard:".into(),
+                "discard (enter to confirm):".into(),
                 None,
-                completers::filename,
-                move |cx: &mut Context, input: &str, event: PromptEvent| {
+                completers::none,
+                move |cx: &mut Context, _input: &str, event: PromptEvent| {
                     if event != PromptEvent::Validate {
                         return;
                     }
-                    let input = input.trim();
-                    if input.is_empty() {
-                        return;
-                    }
 
-                    let path = PathBuf::from(input);
-                    match discard(&root, &path, status, staged) {
-                        Ok(()) => schedule_post_git(Some(path)),
+                    let reload = single_file(&files);
+                    match discard(&root, &files, status, staged) {
+                        Ok(()) => schedule_post_git(reload),
                         Err(_) => cx
                             .editor
                             .set_error(format!("Could not discard {}", path.display())),
@@ -556,7 +542,95 @@ impl ChangesSidebar {
     }
 }
 
-fn insert_path(children: &mut Vec<Entry>, base: &Path, components: &[&str], status: GitStatus) {
+fn single_file(files: &[PathBuf]) -> Option<PathBuf> {
+    match files {
+        [path] => Some(path.clone()),
+        _ => None,
+    }
+}
+
+fn open_file_callback(path: PathBuf) -> Callback {
+    Box::new(
+        move |_compositor, cx| match cx.editor.open(&path, Action::Replace) {
+            Ok(doc_id) => schedule_goto_first_change(cx.jobs, doc_id),
+            Err(err) => cx
+                .editor
+                .set_error(format!("Failed to open {}: {}", path.display(), err)),
+        },
+    )
+}
+
+fn render_title(panel: Rect, surface: &mut Surface, theme: &Theme) {
+    let title = "Git changes";
+    let style = theme
+        .try_get("ui.text.inactive")
+        .or_else(|| theme.try_get("ui.virtual"))
+        .or_else(|| theme.try_get("comment"))
+        .unwrap_or_else(|| theme.get("ui.text"))
+        .add_modifier(Modifier::BOLD);
+
+    let x = panel.x + panel.width.saturating_sub(title.len() as u16) / 2;
+    surface.set_stringn(x, panel.y, title, panel.width as usize, style);
+}
+
+fn render_empty(inner: Rect, surface: &mut Surface, theme: &Theme) {
+    let style = theme.get("ui.text");
+    surface.set_stringn(inner.x, inner.y, "No changes", inner.width as usize, style);
+}
+
+fn render_group_row(row: &Row, y: u16, inner: Rect, surface: &mut Surface, style: Style) {
+    let indent = "  ".repeat(row.depth);
+    let marker = if row.expanded { "\u{25be} " } else { "\u{25b8} " };
+    let line = format!("{indent}{marker}{}", row.label);
+
+    surface.set_stringn(inner.x, y, &line, inner.width as usize, style);
+}
+
+fn render_entry_row(
+    row: &Row,
+    y: u16,
+    inner: Rect,
+    surface: &mut Surface,
+    style: Style,
+    styles: &RowStyles,
+) {
+    let end = inner.x + inner.width;
+    let label_end = end.saturating_sub(CHECKBOX_GAP + CHECKBOX_WIDTH);
+
+    let indent = "  ".repeat(row.depth);
+    let (x, _) = surface.set_stringn(inner.x, y, &indent, inner.width as usize, style);
+
+    let (icon, color) = entry_icon(row, styles);
+    let glyph = format!("{icon} ");
+    let (x, _) = surface.set_stringn(
+        x,
+        y,
+        &glyph,
+        label_end.saturating_sub(x) as usize,
+        Style::default().fg(color),
+    );
+    surface.set_stringn(x, y, &row.label, label_end.saturating_sub(x) as usize, style);
+
+    let cb_x = end.saturating_sub(CHECKBOX_WIDTH);
+    surface.set_stringn(cb_x, y, row.stage.glyph(), CHECKBOX_WIDTH as usize, style);
+}
+
+fn entry_icon(row: &Row, styles: &RowStyles) -> (&'static str, Color) {
+    if let RowKind::Dir = row.kind {
+        let (glyph, _) = icons::folder_icon(row.expanded);
+        (glyph, styles.dir.fg.unwrap_or(Color::Reset))
+    } else {
+        icons::file_icon(Path::new(&row.label))
+    }
+}
+
+fn insert_path(
+    children: &mut Vec<Entry>,
+    base: &Path,
+    components: &[&str],
+    status: GitStatus,
+    stage: StageState,
+) {
     let Some((first, rest)) = components.split_first() else {
         return;
     };
@@ -571,6 +645,7 @@ fn insert_path(children: &mut Vec<Entry>, base: &Path, components: &[&str], stat
                 path: path.clone(),
                 is_dir: !is_file,
                 status,
+                stage,
                 expanded: true,
                 children: Vec::new(),
             });
@@ -579,7 +654,7 @@ fn insert_path(children: &mut Vec<Entry>, base: &Path, components: &[&str], stat
     };
 
     if !is_file {
-        insert_path(&mut children[index].children, &path, rest, status);
+        insert_path(&mut children[index].children, &path, rest, status, stage);
     }
 }
 
@@ -608,7 +683,7 @@ fn sort_entries(entries: &mut Vec<Entry>) {
     }
 }
 
-fn push_entry_rows(rows: &mut Vec<Row>, entry: &Entry, depth: usize, section: Section) {
+fn push_entry_rows(rows: &mut Vec<Row>, entry: &Entry, depth: usize) {
     rows.push(Row {
         depth,
         label: entry.name.clone(),
@@ -617,64 +692,138 @@ fn push_entry_rows(rows: &mut Vec<Row>, entry: &Entry, depth: usize, section: Se
         } else {
             RowKind::File
         },
-        section,
         status: entry.status,
+        stage: entry.stage,
         path: entry.path.clone(),
         expanded: entry.expanded,
     });
 
     if entry.is_dir && entry.expanded {
         for child in &entry.children {
-            push_entry_rows(rows, child, depth + 1, section);
+            push_entry_rows(rows, child, depth + 1);
         }
     }
 }
 
-fn categorize(changes: Vec<FileChange>) -> [Vec<PathBuf>; 3] {
-    let mut added = Vec::new();
-    let mut modified = Vec::new();
-    let mut deleted = Vec::new();
+fn collect_changes(
+    staged: Vec<FileChange>,
+    unstaged: Vec<FileChange>,
+) -> HashMap<PathBuf, ChangeInfo> {
+    let mut changes: HashMap<PathBuf, ChangeInfo> = HashMap::new();
 
-    for change in changes {
-        let status = GitStatus::from_change(&change);
-        let path = helix_stdx::path::canonicalize(change.path());
-        match status {
-            GitStatus::Added => added.push(path),
-            GitStatus::Modified => modified.push(path),
-            GitStatus::Deleted => deleted.push(path),
-        }
+    for change in staged {
+        let (path, status) = change_info(&change);
+        changes.insert(
+            path,
+            ChangeInfo {
+                status,
+                stage: StageState::Staged,
+            },
+        );
     }
 
-    [added, modified, deleted]
+    for change in unstaged {
+        let (path, status) = change_info(&change);
+        changes
+            .entry(path)
+            .and_modify(|info| info.stage = StageState::Partial)
+            .or_insert(ChangeInfo {
+                status,
+                stage: StageState::Unstaged,
+            });
+    }
+
+    changes
 }
 
-fn find_entry_mut<'a>(entries: &'a mut [Entry], path: &Path) -> Option<&'a mut Entry> {
-    for entry in entries.iter_mut() {
+fn change_info(change: &FileChange) -> (PathBuf, GitStatus) {
+    let path = helix_stdx::path::canonicalize(change.path());
+    let status = GitStatus::from_change(change);
+
+    (path, status)
+}
+
+fn entry_index_path(entries: &[Entry], path: &Path) -> Option<Vec<usize>> {
+    for (index, entry) in entries.iter().enumerate() {
         if entry.path == path {
-            return Some(entry);
+            return Some(vec![index]);
         }
         if entry.is_dir {
-            if let Some(found) = find_entry_mut(&mut entry.children, path) {
-                return Some(found);
+            if let Some(mut rest) = entry_index_path(&entry.children, path) {
+                rest.insert(0, index);
+                return Some(rest);
             }
         }
     }
     None
 }
 
-fn run_git(root: &Path, args: &[&str], path: &Path) -> io::Result<ExitStatus> {
+fn find_entry_mut<'a>(entries: &'a mut [Entry], path: &Path) -> Option<&'a mut Entry> {
+    let indices = entry_index_path(entries, path)?;
+    let (first, rest) = indices.split_first()?;
+
+    let mut entry = entries.get_mut(*first)?;
+    for index in rest {
+        entry = entry.children.get_mut(*index)?;
+    }
+
+    Some(entry)
+}
+
+fn find_entry<'a>(entries: &'a [Entry], path: &Path) -> Option<&'a Entry> {
+    let indices = entry_index_path(entries, path)?;
+    let (first, rest) = indices.split_first()?;
+
+    let mut entry = entries.get(*first)?;
+    for index in rest {
+        entry = entry.children.get(*index)?;
+    }
+
+    Some(entry)
+}
+
+fn collect_leaves(entry: &Entry, out: &mut Vec<PathBuf>) {
+    if entry.is_dir {
+        for child in &entry.children {
+            collect_leaves(child, out);
+        }
+    } else {
+        out.push(entry.path.clone());
+    }
+}
+
+fn aggregate_stage(entry: &mut Entry) -> StageState {
+    if !entry.is_dir {
+        return entry.stage;
+    }
+
+    let mut combined: Option<StageState> = None;
+    for child in &mut entry.children {
+        let child_stage = aggregate_stage(child);
+        combined = Some(match combined {
+            Some(current) if current != child_stage => StageState::Partial,
+            Some(current) => current,
+            None => child_stage,
+        });
+    }
+
+    entry.stage = combined.unwrap_or(StageState::Unstaged);
+    entry.stage
+}
+
+fn run_git(root: &Path, args: &[&str], paths: &[PathBuf]) -> io::Result<ExitStatus> {
     Command::new("git")
         .arg("-C")
         .arg(root)
         .args(args)
         .arg("--")
-        .arg(path)
+        .args(paths)
         .status()
 }
 
-fn discard(root: &Path, path: &Path, status: GitStatus, staged: bool) -> io::Result<()> {
-    let check = |status: ExitStatus| {
-        if status.success() {
+fn discard(root: &Path, files: &[PathBuf], status: GitStatus, staged: bool) -> io::Result<()> {
+    let check = |exit: ExitStatus| {
+        if exit.success() {
             Ok(())
         } else {
             Err(io::Error::other("git command failed"))
@@ -682,23 +831,45 @@ fn discard(root: &Path, path: &Path, status: GitStatus, staged: bool) -> io::Res
     };
 
     if staged {
-        check(run_git(root, &["restore", "--staged"], path)?)?;
+        check(run_git(root, &["restore", "--staged"], files)?)?;
     }
 
     match status {
         GitStatus::Added => {
-            if path.is_dir() {
-                std::fs::remove_dir_all(path)?;
-            } else if path.exists() {
-                std::fs::remove_file(path)?;
+            for path in files {
+                delete_from_disk(path)?;
             }
+            prune_empty_ancestors(root, files);
         }
         GitStatus::Modified | GitStatus::Deleted => {
-            check(run_git(root, &["restore"], path)?)?;
+            check(run_git(root, &["restore"], files)?)?;
         }
     }
 
     Ok(())
+}
+
+fn delete_from_disk(path: &Path) -> io::Result<()> {
+    if path.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else if path.exists() {
+        std::fs::remove_file(path)
+    } else {
+        Ok(())
+    }
+}
+
+fn prune_empty_ancestors(root: &Path, files: &[PathBuf]) {
+    for file in files {
+        let mut dir = file.parent();
+
+        while let Some(current) = dir {
+            if current == root || std::fs::remove_dir(current).is_err() {
+                break;
+            }
+            dir = current.parent();
+        }
+    }
 }
 
 fn schedule_post_git(reload_path: Option<PathBuf>) {
