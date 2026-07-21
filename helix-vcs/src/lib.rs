@@ -17,7 +17,7 @@ mod diff;
 pub mod forge;
 
 pub use blame::{FileBlame, LineBlame};
-pub use diff::{DiffHandle, Hunk};
+pub use diff::{diff_hunks, DiffHandle, Hunk};
 
 mod status;
 

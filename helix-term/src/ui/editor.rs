@@ -149,6 +149,49 @@ impl EditorView {
         }
     }
 
+    fn handle_diff_view_key(
+        &mut self,
+        key: KeyEvent,
+        context: &mut crate::compositor::Context,
+    ) -> Option<EventResult> {
+        let (doc_id, window_height) = {
+            let view = view!(context.editor);
+            (view.doc, view.area.height)
+        };
+
+        context.editor.document(doc_id)?.diff_view.as_ref()?;
+
+        let mut key = key;
+        canonicalize_key(&mut key);
+
+        let mid_chord = !self.keymaps.pending().is_empty();
+        let leader = matches!(
+            key.code,
+            KeyCode::Char(' ') | KeyCode::Char(':') | KeyCode::Char(';')
+        );
+        if mid_chord || leader {
+            return None;
+        }
+
+        let visible = crate::ui::diff_view::visible_rows(window_height);
+        let half = (visible / 2).max(1);
+        let diff = context.editor.document_mut(doc_id)?.diff_view.as_mut()?;
+
+        match (key.code, key.modifiers) {
+            (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, _) => {
+                diff.scroll_down(1, visible)
+            }
+            (KeyCode::Char('k'), KeyModifiers::NONE) | (KeyCode::Up, _) => diff.scroll_up(1),
+            (KeyCode::Char('d'), KeyModifiers::CONTROL) => diff.scroll_down(half, visible),
+            (KeyCode::Char('u'), KeyModifiers::CONTROL) => diff.scroll_up(half),
+            (KeyCode::PageDown, _) => diff.scroll_down(visible, visible),
+            (KeyCode::PageUp, _) => diff.scroll_up(visible),
+            _ => return None,
+        }
+
+        Some(EventResult::Consumed(None))
+    }
+
     fn sidebar_nav_keys(&self) -> NavKeys {
         let map = self.keymaps.map();
         match map.get(&Mode::Normal) {
@@ -195,8 +238,12 @@ impl EditorView {
         surface: &mut Surface,
         is_focused: bool,
     ) {
+        if doc.diff_view.is_some() {
+            self.render_diff_window(editor, doc, view, viewport, surface, is_focused);
+            return;
+        }
+
         let inner = view.inner_area(doc);
-        let area = view.area;
         let theme = &editor.theme;
         let config = editor.config();
         let loader = editor.syn_loader.load();
@@ -347,17 +394,7 @@ impl EditorView {
             decorations,
         );
 
-        // if we're not at the edge of the screen, draw a right border
-        if viewport.right() != view.area.right() {
-            let x = area.right();
-            let border_style = theme.get("ui.window");
-            for y in area.top()..area.bottom() {
-                surface[(x, y)]
-                    .set_symbol(tui::symbols::line::VERTICAL)
-                    //.set_symbol(" ")
-                    .set_style(border_style);
-            }
-        }
+        Self::render_window_border(view, viewport, surface, theme);
 
         if config.inline_diagnostics.disabled()
             && config.end_of_line_diagnostics == DiagnosticFilter::Disable
@@ -365,6 +402,51 @@ impl EditorView {
             Self::render_diagnostics(doc, view, inner, surface, theme);
         }
 
+        self.render_window_statusline(editor, doc, view, surface, is_focused);
+    }
+
+    fn render_diff_window(
+        &self,
+        editor: &Editor,
+        doc: &Document,
+        view: &View,
+        viewport: Rect,
+        surface: &mut Surface,
+        is_focused: bool,
+    ) {
+        let theme = &editor.theme;
+
+        if let Some(diff) = doc.diff_view.as_ref() {
+            crate::ui::diff_view::render(diff, view.area.clip_bottom(1), surface, theme);
+        }
+
+        Self::render_window_border(view, viewport, surface, theme);
+        self.render_window_statusline(editor, doc, view, surface, is_focused);
+    }
+
+    /// Draws the right border of a window unless it sits at the screen edge.
+    fn render_window_border(view: &View, viewport: Rect, surface: &mut Surface, theme: &Theme) {
+        if viewport.right() == view.area.right() {
+            return;
+        }
+
+        let x = view.area.right();
+        let border_style = theme.get("ui.window");
+        for y in view.area.top()..view.area.bottom() {
+            surface[(x, y)]
+                .set_symbol(tui::symbols::line::VERTICAL)
+                .set_style(border_style);
+        }
+    }
+
+    fn render_window_statusline(
+        &self,
+        editor: &Editor,
+        doc: &Document,
+        view: &View,
+        surface: &mut Surface,
+        is_focused: bool,
+    ) {
         let statusline_area = view
             .area
             .clip_top(view.area.height.saturating_sub(1))
@@ -842,13 +924,16 @@ impl EditorView {
         let current_doc = view!(editor).doc;
 
         for doc in editor.documents() {
-            let fname = doc
-                .path()
-                .unwrap_or(&scratch)
-                .file_name()
-                .unwrap_or_default()
-                .to_str()
-                .unwrap_or_default();
+            let fname = match doc.diff_view.as_ref() {
+                Some(diff) => diff.title.as_str(),
+                None => doc
+                    .path()
+                    .unwrap_or(&scratch)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_str()
+                    .unwrap_or_default(),
+            };
 
             let mut style = if current_doc == doc.id() {
                 bufferline_active
@@ -1648,6 +1733,9 @@ impl Component for EditorView {
     ) -> EventResult {
         if let Event::Key(key) = event {
             if let Some(result) = self.handle_sidebar_key(*key, context) {
+                return result;
+            }
+            if let Some(result) = self.handle_diff_view_key(*key, context) {
                 return result;
             }
         }

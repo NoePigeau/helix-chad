@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use helix_core::Rope;
 use helix_event::RenderLockGuard;
-use imara_diff::Algorithm;
+use imara_diff::{Algorithm, IndentHeuristic, IndentLevel};
 use parking_lot::{RwLock, RwLockReadGuard};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinHandle;
@@ -15,6 +15,33 @@ pub use imara_diff::Hunk;
 
 mod line_cache;
 mod worker;
+
+/// Computes the line-level hunks between `diff_base` and `doc` synchronously.
+///
+/// Returns an empty list when either input is too large to diff safely.
+pub fn diff_hunks(diff_base: Rope, doc: Rope) -> Vec<Hunk> {
+    let interner = line_cache::InternedRopeLines::new(diff_base, doc);
+    let Some(input) = interner.interned_lines() else {
+        return Vec::new();
+    };
+
+    let mut diff = imara_diff::Diff::default();
+    diff.compute_with(
+        ALGORITHM,
+        &input.before,
+        &input.after,
+        input.interner.num_tokens(),
+    );
+    diff.postprocess_with(
+        &input.before,
+        &input.after,
+        IndentHeuristic::new(|token| {
+            IndentLevel::for_ascii_line(input.interner[token].bytes(), 4)
+        }),
+    );
+
+    diff.hunks().collect()
+}
 
 /// A rendering lock passed to the differ the prevents redraws from occurring
 struct RenderLock {

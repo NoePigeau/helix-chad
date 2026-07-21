@@ -1,5 +1,6 @@
 mod changes;
 mod completion;
+mod diff_view;
 mod document;
 pub(crate) mod editor;
 mod explorer;

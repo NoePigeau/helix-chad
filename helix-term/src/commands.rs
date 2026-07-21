@@ -454,6 +454,7 @@ impl MappableCommand {
         goto_window_bottom, "Goto window bottom",
         goto_last_accessed_file, "Goto last accessed file",
         goto_last_modified_file, "Goto last modified file",
+        goto_diff_view_file, "Goto the file shown in the diff view",
         goto_last_modification, "Goto last modification",
         goto_line, "Goto line",
         goto_last_line, "Goto last line",
@@ -3139,6 +3140,9 @@ fn ensure_selections_forward(cx: &mut Context) {
 }
 
 fn enter_insert_mode(cx: &mut Context) {
+    if doc!(cx.editor).diff_view.is_some() {
+        return;
+    }
     cx.editor.mode = Mode::Insert;
 }
 
@@ -4405,6 +4409,17 @@ fn goto_prev_diag(cx: &mut Context) {
             .immediately_show_diagnostic(doc, view.id);
     };
     cx.editor.apply_motion(motion)
+}
+
+fn goto_diff_view_file(cx: &mut Context) {
+    let Some(path) = doc!(cx.editor).diff_view.as_ref().map(|diff| diff.path.clone()) else {
+        return;
+    };
+
+    if let Err(err) = cx.editor.open(&path, Action::Replace) {
+        cx.editor
+            .set_error(format!("Failed to open {}: {}", path.display(), err));
+    }
 }
 
 fn goto_first_change(cx: &mut Context) {

@@ -2239,6 +2239,17 @@ impl Editor {
         )
     }
 
+    pub fn new_diff_view(
+        &mut self,
+        action: Action,
+        diff_view: crate::diff_view::DiffView,
+    ) -> DocumentId {
+        let mut doc = Document::default(self.config.clone(), self.syn_loader.clone());
+        doc.readonly = true;
+        doc.diff_view = Some(diff_view);
+        self.new_file_from_document(action, doc)
+    }
+
     pub fn new_file_from_stdin(&mut self, action: Action) -> Result<DocumentId, Error> {
         let (stdin, encoding, has_bom) = crate::document::read_to_string(&mut stdin(), None)?;
         let doc = Document::from(

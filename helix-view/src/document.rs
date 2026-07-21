@@ -210,6 +210,10 @@ pub struct Document {
     version_control_head: Option<Arc<ArcSwap<Box<str>>>>,
     pub blame: Option<FileBlame>,
 
+    /// When set, this document is a read-only side-by-side diff rendered as its
+    /// own buffer instead of editable text.
+    pub diff_view: Option<crate::diff_view::DiffView>,
+
     // when document was used for most-recent-used buffer picker
     pub focused_at: std::time::Instant,
 
@@ -762,6 +766,7 @@ impl Document {
             language_servers: HashMap::new(),
             diff_handle: None,
             blame: None,
+            diff_view: None,
             config,
             version_control_head: None,
             focused_at: std::time::Instant::now(),
@@ -1650,6 +1655,12 @@ impl Document {
         view_id: ViewId,
         emit_lsp_notification: bool,
     ) -> bool {
+        // A diff view is a read-only buffer: reject any transaction that would
+        // change its text.
+        if self.diff_view.is_some() && !transaction.changes().is_empty() {
+            return false;
+        }
+
         // store the state just before any changes are made. This allows us to undo to the
         // state just before a transaction was applied.
         if self.changes.is_empty() && !transaction.changes().is_empty() {
@@ -2143,6 +2154,10 @@ impl Document {
     }
 
     pub fn display_name(&self) -> Cow<'_, str> {
+        if let Some(diff_view) = &self.diff_view {
+            return Cow::Borrowed(&diff_view.title);
+        }
+
         self.relative_path()
             .map_or_else(|| SCRATCH_BUFFER_NAME.into(), |path| path.to_string_lossy())
     }

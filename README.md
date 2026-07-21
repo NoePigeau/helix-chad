@@ -27,9 +27,31 @@ A Zed style list of changed files.
 - A `Staged` group plus Added / Modified / Deleted groups for the unstaged changes, each with counts.
 - Single-child folder chains collapsed into one line (`src/routes/api.export`).
 - Stage / unstage and discard a change directly from the sidebar.
-- Enter opens the file and jumps to its first diff hunk.
+- Enter opens an added or deleted file directly, and a modified file in a side-by-side diff view.
 
 <img src="./contrib/sidebar-git-change.png" alt="Git changes" width="700">
+
+### Diff view
+
+A VS Code style side-by-side diff, opened as its own read-only buffer when you press Enter on a **modified** file in the git changes sidebar (added and deleted files just open normally).
+
+- Two panes: the committed version (`HEAD`) on the left with removed lines tinted red, the working tree on the right with added lines tinted green.
+- Only the changed regions are shown, with 5 lines of context around each; the rest is collapsed behind a separator line.
+- Full tree-sitter syntax highlighting on both sides.
+- Appears in the bufferline as `<file> - (working tree)` and behaves like any buffer — focus it, switch away, close it.
+- Scroll with `j` / `k`, `Ctrl-d` / `Ctrl-u`, `PageUp` / `PageDown`. Press `g Space` to jump to the real file.
+- The line-background tints are themeable. By default they are derived from the theme's `diff.plus` / `diff.minus` colors blended into the background, so they stay light on light themes and dark on dark themes.
+
+| Side    | Theme key         |
+| ------- | ----------------- |
+| Added   | `ui.diff.added`   |
+| Deleted | `ui.diff.deleted` |
+
+```toml
+# in your theme
+"ui.diff.added" = { bg = "#e6ffed" }
+"ui.diff.deleted" = { bg = "#ffeef0" }
+```
 
 ### Git status colors
 
@@ -82,6 +104,7 @@ format = "{author}, {time-ago} • {message}"
 | `Ctrl-e`    | Toggle the sidebar (opens the file explorer, or closes whichever sidebar is open) | `toggle_sidebar`        |
 | `Space e`   | Focus the file explorer on the current file                                       | `focus_file_explorer`   |
 | `Space g`   | Focus the git changes sidebar                                                     | `focus_changes_sidebar` |
+| `g Space`   | Open the real file from the diff view                                             | `goto_diff_view_file`   |
 | `Ctrl-→`    | Widen the focused sidebar                                                         | `widen_sidebar`         |
 | `Ctrl-←`    | Narrow the focused sidebar                                                        | `narrow_sidebar`        |
 | `Space B c` | Copy the URL of the commit that last changed the current line                     | `copy_blame_commit_url` |
@@ -96,6 +119,9 @@ space.e = "focus_file_explorer"
 space.g = "focus_changes_sidebar"
 C-right = "widen_sidebar"
 C-left = "narrow_sidebar"
+
+[keys.normal.g]
+space = "goto_diff_view_file"
 ```
 
 Inside a sidebar:

@@ -4,9 +4,11 @@ use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 use std::process::{Command, ExitStatus};
 use std::time::Duration;
 
+use helix_core::Rope;
 use helix_vcs::FileChange;
 use helix_view::{
     current,
+    diff_view::DiffView,
     editor::Action,
     graphics::{Color, Modifier, Rect, Style},
     input::KeyEvent,
@@ -19,6 +21,7 @@ use tui::buffer::Buffer as Surface;
 
 use crate::compositor::{Callback, Compositor, Context, EventResult};
 use crate::job::{self, Job, Jobs};
+use crate::ui::diff_view;
 use crate::ui::sidebar::{self, GitStatus, SidebarState};
 use crate::ui::{completers, icons, EditorView, Prompt, PromptEvent};
 
@@ -318,8 +321,9 @@ impl ChangesSidebar {
             }
             RowKind::File => {
                 let path = row.path.clone();
+                let status = row.status;
                 self.state.unfocus();
-                EventResult::Consumed(Some(open_file_callback(path)))
+                EventResult::Consumed(Some(open_change_callback(path, status)))
             }
         }
     }
@@ -549,6 +553,13 @@ fn single_file(files: &[PathBuf]) -> Option<PathBuf> {
     }
 }
 
+fn open_change_callback(path: PathBuf, status: GitStatus) -> Callback {
+    match status {
+        GitStatus::Modified => Box::new(move |_compositor, cx| open_diff_view(cx, path)),
+        GitStatus::Added | GitStatus::Deleted => open_file_callback(path),
+    }
+}
+
 fn open_file_callback(path: PathBuf) -> Callback {
     Box::new(
         move |_compositor, cx| match cx.editor.open(&path, Action::Replace) {
@@ -558,6 +569,50 @@ fn open_file_callback(path: PathBuf) -> Callback {
                 .set_error(format!("Failed to open {}: {}", path.display(), err)),
         },
     )
+}
+
+fn open_diff_view(cx: &mut Context, path: PathBuf) {
+    let workspace = helix_loader::find_workspace_in(&path).0;
+    let trust_full = sidebar::is_git_trusted(cx.editor, &workspace);
+
+    let base = cx.editor.diff_providers.get_diff_base(&path, trust_full);
+    let current = std::fs::read(&path);
+
+    let (Some(base), Ok(current)) = (base, current) else {
+        return open_file(cx, &path);
+    };
+
+    let base = Rope::from(String::from_utf8_lossy(&base).as_ref());
+    let doc = Rope::from(String::from_utf8_lossy(&current).as_ref());
+
+    let mut diff = DiffView::new(diff_title(&path), path.clone(), base, doc);
+    attach_highlights(&mut diff, &path, cx.editor);
+
+    cx.editor.new_diff_view(Action::Replace, diff);
+}
+
+fn attach_highlights(diff: &mut DiffView, path: &Path, editor: &Editor) {
+    let loader = editor.syn_loader.load();
+    let theme = &editor.theme;
+
+    diff.base_highlights = diff_view::highlight_lines(&diff.base, path, &loader, theme);
+    diff.doc_highlights = diff_view::highlight_lines(&diff.doc, path, &loader, theme);
+}
+
+fn open_file(cx: &mut Context, path: &Path) {
+    if let Err(err) = cx.editor.open(path, Action::Replace) {
+        cx.editor
+            .set_error(format!("Failed to open {}: {}", path.display(), err));
+    }
+}
+
+fn diff_title(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("file");
+
+    format!("{name} - (working tree)")
 }
 
 fn render_title(panel: Rect, surface: &mut Surface, theme: &Theme) {
