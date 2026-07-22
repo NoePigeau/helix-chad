@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "colibri";
             const default_dark_theme = "colibri";
-            window.path_to_searchindex_js = "searchindex-3a374221.js";
+            window.path_to_searchindex_js = "searchindex-2957f9a1.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-c2fa7ea4.js"></script>
@@ -206,6 +206,7 @@
 <li><a href="#editorgutterscode-action-hint-section"><code>[editor.gutters.code-action-hint]</code> Section</a></li>
 </ul>
 </li>
+<li><a href="#editorminimap-section"><code>[editor.minimap]</code> Section</a></li>
 <li><a href="#editorsoft-wrap-section"><code>[editor.soft-wrap]</code> Section</a></li>
 <li><a href="#editorsmart-tab-section"><code>[editor.smart-tab]</code> Section</a></li>
 <li><a href="#editorinline-diagnostics-section"><code>[editor.inline-diagnostics]</code> Section</a></li>
@@ -246,6 +247,7 @@
 <tr><td><code>rulers</code></td><td>List of column positions at which to display the rulers. Can be overridden by language specific <code>rulers</code> in <code>languages.toml</code> file</td><td><code>[]</code></td></tr>
 <tr><td><code>bufferline</code></td><td>Renders a line at the top of the editor displaying open buffers. Can be <code>always</code>, <code>never</code> or <code>multiple</code> (only shown if more than one buffer is in use)</td><td><code>"never"</code></td></tr>
 <tr><td><code>color-modes</code></td><td>Whether to color the mode indicator with different colors depending on the mode itself</td><td><code>false</code></td></tr>
+<tr><td><code>minimap</code></td><td>Zed-style minimap strip on the right edge of each view. See the <code>[editor.minimap]</code> section below</td><td><code>{ enable = true }</code></td></tr>
 <tr><td><code>text-width</code></td><td>Maximum line length. Used for the <code>:reflow</code> command and soft-wrapping if <code>soft-wrap.wrap-at-text-width</code> is set</td><td><code>80</code></td></tr>
 <tr><td><code>workspace-lsp-roots</code></td><td>Directories relative to the workspace root that are treated as LSP roots. Should only be set in <code>.helix/config.toml</code></td><td><code>[]</code></td></tr>
 <tr><td><code>default-line-ending</code></td><td>The line ending to use for new documents. Can be <code>native</code>, <code>lf</code>, <code>crlf</code>, <code>ff</code>, <code>cr</code> or <code>nel</code>. <code>native</code> uses the platform’s native line ending (<code>crlf</code> on Windows, otherwise <code>lf</code>).</td><td><code>"native"</code></td></tr>
@@ -620,6 +622,29 @@ These colors are controlled by the theme attributes <code>diff.plus</code>, <cod
 <h4 id="editorgutterscode-action-hint-section"><a class="header" href="#editorgutterscode-action-hint-section"><code>[editor.gutters.code-action-hint]</code> Section</a></h4>
 <p>The <code>code-action-hint</code> gutter option displays an indicator for whether a code action is available at current selection.</p>
 <p>There are currently no options for this section.</p>
+<h3 id="editorminimap-section"><a class="header" href="#editorminimap-section"><code>[editor.minimap]</code> Section</a></h3>
+<p>The minimap is a thin vertical strip drawn on the right edge of each view, in the
+style of the Zed editor. It shows git changes on its left column, diagnostics on its
+right column, the currently visible range as a grey band, and the primary cursor as a
+colored line. Git change markers scale with the number of changed lines. It does not
+render a scaled-down copy of the text.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Description</th><th>Default</th></tr>
+</thead>
+<tbody>
+<tr><td><code>enable</code></td><td>Whether to render the minimap strip</td><td><code>true</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Example:</p>
+<pre><code class="language-toml">[editor.minimap]
+enable = false
+</code></pre>
+<p>The colors are controlled by the theme attributes <code>ui.minimap</code> (strip background),
+<code>ui.minimap.selection</code> (visible range) and <code>ui.minimap.cursor</code> (cursor line), plus the
+existing <code>diff.plus</code>/<code>diff.minus</code>/<code>diff.delta</code> and <code>error</code>/<code>warning</code>/<code>info</code>/<code>hint</code> scopes.</p>
 <h3 id="editorsoft-wrap-section"><a class="header" href="#editorsoft-wrap-section"><code>[editor.soft-wrap]</code> Section</a></h3>
 <p>Options for soft wrapping lines that exceed the view width:</p>
 <div class="table-wrapper">
