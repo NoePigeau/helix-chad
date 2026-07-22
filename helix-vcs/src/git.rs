@@ -167,7 +167,7 @@ fn find_merging_commit(repo: &Repository, target: ObjectId) -> Result<Option<Obj
 
     let (mut newest, mut oldest) = (0, first_parent_chain.len() - 1);
     while newest < oldest {
-        let middle = (newest + oldest + 1) / 2;
+        let middle = (newest + oldest).div_ceil(2);
         if is_ancestor(repo, target, first_parent_chain[middle]) {
             newest = middle;
         } else {
