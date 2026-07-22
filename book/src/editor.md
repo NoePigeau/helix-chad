@@ -19,6 +19,7 @@
   - [`[editor.gutters.diff]` Section](#editorguttersdiff-section)
   - [`[editor.gutters.spacer]` Section](#editorguttersspacer-section)
   - [`[editor.gutters.code-action-hint]` Section](#editorgutterscode-action-hint-section)
+- [`[editor.minimap]` Section](#editorminimap-section)
 - [`[editor.soft-wrap]` Section](#editorsoft-wrap-section)
 - [`[editor.smart-tab]` Section](#editorsmart-tab-section)
 - [`[editor.inline-diagnostics]` Section](#editorinline-diagnostics-section)
@@ -56,6 +57,7 @@
 | `rulers` | List of column positions at which to display the rulers. Can be overridden by language specific `rulers` in `languages.toml` file | `[]` |
 | `bufferline` | Renders a line at the top of the editor displaying open buffers. Can be `always`, `never` or `multiple` (only shown if more than one buffer is in use) | `"never"` |
 | `color-modes` | Whether to color the mode indicator with different colors depending on the mode itself | `false` |
+| `minimap` | Zed-style minimap strip on the right edge of each view. See the `[editor.minimap]` section below | `{ enable = true }` |
 | `text-width` | Maximum line length. Used for the `:reflow` command and soft-wrapping if `soft-wrap.wrap-at-text-width` is set | `80` |
 | `workspace-lsp-roots` | Directories relative to the workspace root that are treated as LSP roots. Should only be set in `.helix/config.toml` | `[]` |
 | `default-line-ending` | The line ending to use for new documents. Can be `native`, `lf`, `crlf`, `ff`, `cr` or `nel`. `native` uses the platform's native line ending (`crlf` on Windows, otherwise `lf`). | `"native"` |
@@ -442,6 +444,29 @@ Currently unused
 The `code-action-hint` gutter option displays an indicator for whether a code action is available at current selection.
 
 There are currently no options for this section.
+
+### `[editor.minimap]` Section
+
+The minimap is a thin vertical strip drawn on the right edge of each view, in the
+style of the Zed editor. It shows git changes on its left column, diagnostics on its
+right column, the currently visible range as a grey band, and the primary cursor as a
+colored line. Git change markers scale with the number of changed lines. It does not
+render a scaled-down copy of the text.
+
+| Key      | Description                          | Default |
+| ---      | ---                                  | ---     |
+| `enable` | Whether to render the minimap strip  | `true`  |
+
+Example:
+
+```toml
+[editor.minimap]
+enable = false
+```
+
+The colors are controlled by the theme attributes `ui.minimap` (strip background),
+`ui.minimap.selection` (visible range) and `ui.minimap.cursor` (cursor line), plus the
+existing `diff.plus`/`diff.minus`/`diff.delta` and `error`/`warning`/`info`/`hint` scopes.
 
 ### `[editor.soft-wrap]` Section
 

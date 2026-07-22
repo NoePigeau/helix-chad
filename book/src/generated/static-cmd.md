@@ -108,6 +108,9 @@
 | `focus_changes_sidebar` | Focus git changes sidebar | normal: `` <space>g ``, select: `` <space>g `` |
 | `widen_sidebar` | Widen the focused sidebar | normal: `` <C-right> ``, select: `` <C-right> `` |
 | `narrow_sidebar` | Narrow the focused sidebar | normal: `` <C-left> ``, select: `` <C-left> `` |
+| `copy_blame_commit_url` | Copy the URL of the commit that last changed the current line | normal: `` <space>Bc ``, select: `` <space>Bc `` |
+| `copy_blame_pull_request_url` | Copy the URL of the pull request that introduced the commit of the current line | normal: `` <space>Bp ``, select: `` <space>Bp `` |
+| `toggle_inline_blame` | Toggle inline git blame annotations | normal: `` <space>Bt ``, select: `` <space>Bt `` |
 | `code_action` | Perform code action | normal: `` <space>a ``, select: `` <space>a `` |
 | `buffer_picker` | Open buffer picker | normal: `` <space>b ``, select: `` <space>b `` |
 | `jumplist_picker` | Open jumplist picker | normal: `` <space>j ``, select: `` <space>j `` |
@@ -148,6 +151,7 @@
 | `goto_window_bottom` | Goto window bottom | normal: `` gb ``, select: `` gb `` |
 | `goto_last_accessed_file` | Goto last accessed file | normal: `` ga ``, select: `` ga `` |
 | `goto_last_modified_file` | Goto last modified file | normal: `` gm ``, select: `` gm `` |
+| `goto_diff_view_file` | Goto the file shown in the diff view | normal: `` g<space> ``, select: `` g<space> `` |
 | `goto_last_modification` | Goto last modification | normal: `` g. ``, select: `` g. `` |
 | `goto_line` | Goto line | normal: `` G ``, select: `` G `` |
 | `goto_last_line` | Goto last line | normal: `` ge `` |

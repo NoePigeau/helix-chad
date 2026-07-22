@@ -396,6 +396,8 @@ impl EditorView {
 
         Self::render_window_border(view, viewport, surface, theme);
 
+        Self::render_minimap(doc, view, theme, is_focused, surface);
+
         if config.inline_diagnostics.disabled()
             && config.end_of_line_diagnostics == DiagnosticFilter::Disable
         {
@@ -422,6 +424,255 @@ impl EditorView {
 
         Self::render_window_border(view, viewport, surface, theme);
         self.render_window_statusline(editor, doc, view, surface, is_focused);
+    }
+
+    fn render_minimap(
+        doc: &Document,
+        view: &View,
+        theme: &Theme,
+        is_focused: bool,
+        surface: &mut Surface,
+    ) {
+        let Some(area) = view.minimap_area(doc) else {
+            return;
+        };
+
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let total_lines = doc.text().len_lines().max(1);
+
+        surface.set_style(area, theme.get("ui.minimap"));
+
+        Self::render_minimap_viewport(doc, view, theme, area, total_lines, surface);
+
+        if is_focused {
+            Self::render_minimap_cursor(doc, view, theme, area, total_lines, surface);
+        }
+
+        Self::render_minimap_diff(doc, theme, area, total_lines, surface);
+
+        Self::render_minimap_diagnostics(doc, theme, area, total_lines, surface);
+    }
+
+    fn render_minimap_viewport(
+        doc: &Document,
+        view: &View,
+        theme: &Theme,
+        area: Rect,
+        total_lines: usize,
+        surface: &mut Surface,
+    ) {
+        let text = doc.text();
+        let rows = area.height as usize;
+
+        let view_offset = doc.view_offset(view.id);
+        let top_line = text.char_to_line(view_offset.anchor.min(text.len_chars()));
+        let bottom_line = view.estimate_last_doc_line(doc);
+
+        let style = theme
+            .try_get("ui.minimap.selection")
+            .unwrap_or_else(|| theme.get("ui.highlight"));
+
+        let start = Self::minimap_row(top_line, total_lines, rows);
+        let end = Self::minimap_row(bottom_line, total_lines, rows);
+
+        for row in start..=end {
+            surface.set_style(Rect::new(area.x, area.y + row as u16, area.width, 1), style);
+        }
+    }
+
+    fn render_minimap_cursor(
+        doc: &Document,
+        view: &View,
+        theme: &Theme,
+        area: Rect,
+        total_lines: usize,
+        surface: &mut Surface,
+    ) {
+        let text = doc.text();
+        let rows = area.height as usize;
+
+        let cursor = doc.selection(view.id).primary().cursor(text.slice(..));
+        let cursor_line = text.char_to_line(cursor);
+
+        let style = theme
+            .try_get("ui.minimap.cursor")
+            .unwrap_or_else(|| theme.get("ui.cursor.primary"));
+
+        let Some(color) = style.fg.or(style.bg) else {
+            return;
+        };
+
+        let cursor_sub_rows = rows * 2;
+        let cursor_sub = if total_lines <= 1 {
+            0
+        } else {
+            (cursor_line * cursor_sub_rows / total_lines).min(cursor_sub_rows - 1)
+        };
+
+        let symbol = if cursor_sub % 2 == 0 { "▔" } else { "▁" };
+        let cursor_row = (cursor_sub / 2) as u16;
+
+        for x in area.x..area.right() {
+            if let Some(cell) = surface.get_mut(x, area.y + cursor_row) {
+                cell.set_symbol(symbol).set_fg(color);
+            }
+        }
+    }
+
+    fn render_minimap_diff(
+        doc: &Document,
+        theme: &Theme,
+        area: Rect,
+        total_lines: usize,
+        surface: &mut Surface,
+    ) {
+        let Some(diff_handle) = doc.diff_handle() else {
+            return;
+        };
+
+        let hunks = diff_handle.load();
+        let added = theme.get("diff.plus.gutter").fg;
+        let deleted = theme.get("diff.minus.gutter").fg;
+        let modified = theme.get("diff.delta.gutter").fg;
+
+        let rows = area.height as usize;
+        let sub_rows = rows * 8;
+        let mut coverage = vec![0u8; rows];
+        let mut colors: Vec<Option<Color>> = vec![None; rows];
+
+        for i in 0..hunks.len() {
+            let hunk = hunks.nth_hunk(i);
+
+            let (color, start, end) = if hunk.is_pure_insertion() {
+                (added, hunk.after.start, hunk.after.end)
+            } else if hunk.is_pure_removal() {
+                (deleted, hunk.after.start, hunk.after.start + 1)
+            } else {
+                (modified, hunk.after.start, hunk.after.end)
+            };
+
+            for line in start..end {
+                Self::accumulate_minimap_line(
+                    &mut coverage,
+                    line as usize,
+                    sub_rows,
+                    total_lines,
+                    |cell| colors[cell] = color,
+                );
+            }
+        }
+
+        Self::paint_minimap_bars(surface, area.x, area.y, &coverage, &colors);
+    }
+
+    fn render_minimap_diagnostics(
+        doc: &Document,
+        theme: &Theme,
+        area: Rect,
+        total_lines: usize,
+        surface: &mut Surface,
+    ) {
+        use helix_core::diagnostic::Severity;
+
+        let error = theme.get("error").fg;
+        let warning = theme.get("warning").fg;
+        let info = theme.get("info").fg;
+        let hint = theme.get("hint").fg;
+
+        let rows = area.height as usize;
+        let sub_rows = rows * 8;
+        let mut coverage = vec![0u8; rows];
+        let mut severities: Vec<Option<Severity>> = vec![None; rows];
+
+        for diagnostic in doc.diagnostics() {
+            let severity = diagnostic.severity();
+
+            Self::accumulate_minimap_line(
+                &mut coverage,
+                diagnostic.line,
+                sub_rows,
+                total_lines,
+                |cell| {
+                    if severities[cell].is_none_or(|current| severity > current) {
+                        severities[cell] = Some(severity);
+                    }
+                },
+            );
+        }
+
+        let colors: Vec<Option<Color>> = severities
+            .iter()
+            .map(|severity| {
+                severity.and_then(|severity| match severity {
+                    Severity::Error => error,
+                    Severity::Warning => warning,
+                    Severity::Info => info,
+                    Severity::Hint => hint,
+                })
+            })
+            .collect();
+
+        let diag_col = area.right().saturating_sub(1);
+
+        Self::paint_minimap_bars(surface, diag_col, area.y, &coverage, &colors);
+    }
+
+    fn minimap_row(line: usize, total_lines: usize, rows: usize) -> usize {
+        if total_lines <= 1 || rows == 0 {
+            return 0;
+        }
+
+        (line * rows / total_lines).min(rows - 1)
+    }
+
+    fn minimap_line_span(line: usize, sub_rows: usize, total_lines: usize) -> (usize, usize) {
+        let sub_start = line * sub_rows / total_lines;
+        let sub_end = ((line + 1) * sub_rows / total_lines)
+            .max(sub_start + 1)
+            .min(sub_rows);
+
+        (sub_start, sub_end)
+    }
+
+    fn accumulate_minimap_line(
+        coverage: &mut [u8],
+        line: usize,
+        sub_rows: usize,
+        total_lines: usize,
+        mut on_cell: impl FnMut(usize),
+    ) {
+        let (sub_start, sub_end) = Self::minimap_line_span(line, sub_rows, total_lines);
+
+        for sub in sub_start..sub_end {
+            let cell = sub / 8;
+            coverage[cell] = (coverage[cell] + 1).min(8);
+            on_cell(cell);
+        }
+    }
+
+    fn paint_minimap_bars(
+        surface: &mut Surface,
+        x: u16,
+        y: u16,
+        coverage: &[u8],
+        colors: &[Option<Color>],
+    ) {
+        const EIGHTHS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+        for (cell, &cover) in coverage.iter().enumerate() {
+            if cover == 0 {
+                continue;
+            }
+
+            if let Some(color) = colors[cell] {
+                if let Some(target) = surface.get_mut(x, y + cell as u16) {
+                    target.set_symbol(EIGHTHS[cover as usize - 1]).set_fg(color);
+                }
+            }
+        }
     }
 
     /// Draws the right border of a window unless it sits at the screen edge.

@@ -59,12 +59,7 @@ impl DiffProviderRegistry {
             })
     }
 
-    pub fn get_merge_message(
-        &self,
-        file: &Path,
-        trust_full: bool,
-        commit: &str,
-    ) -> Option<String> {
+    pub fn get_merge_message(&self, file: &Path, trust_full: bool, commit: &str) -> Option<String> {
         self.providers.iter().find_map(|provider| {
             match provider.get_merge_message(file, trust_full, commit) {
                 Ok(res) => res,

@@ -170,6 +170,18 @@ pub struct GutterLineNumbersConfig {
     pub min_width: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
+pub struct MinimapConfig {
+    pub enable: bool,
+}
+
+impl Default for MinimapConfig {
+    fn default() -> Self {
+        Self { enable: true }
+    }
+}
+
 impl Default for GutterLineNumbersConfig {
     fn default() -> Self {
         Self { min_width: 3 }
@@ -312,6 +324,7 @@ pub struct Config {
     pub cursorcolumn: bool,
     #[serde(deserialize_with = "deserialize_gutter_seq_or_struct")]
     pub gutters: GutterConfig,
+    pub minimap: MinimapConfig,
     /// Middle click paste support. Defaults to true.
     pub middle_click_paste: bool,
     /// Automatic insertion of pairs to parentheses, brackets,
@@ -1304,6 +1317,7 @@ impl Default for Config {
             cursorline: false,
             cursorcolumn: false,
             gutters: GutterConfig::default(),
+            minimap: MinimapConfig::default(),
             middle_click_paste: true,
             auto_pairs: AutoPairConfig::default(),
             auto_completion: true,

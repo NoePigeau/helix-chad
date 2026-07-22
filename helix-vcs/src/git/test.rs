@@ -231,7 +231,10 @@ fn blame_file_fails_for_untracked_file() {
     create_commit(temp_git.path(), true);
 
     let untracked = temp_git.path().join("untracked.txt");
-    File::create(&untracked).unwrap().write_all(b"bar\n").unwrap();
+    File::create(&untracked)
+        .unwrap()
+        .write_all(b"bar\n")
+        .unwrap();
 
     assert!(git::blame_file(&untracked, true).is_err());
 }

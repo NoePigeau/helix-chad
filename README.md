@@ -89,6 +89,26 @@ format = "{author}, {time-ago} • {message}"
 "ui.virtual.inline-blame" = { fg = "#7A818A", modifiers = ["italic"] }
 ```
 
+### Minimap
+
+- A thin vertical strip on the right edge of each view, in the style of the Zed editor — no scaled-down copy of the text, just the signal.
+- Git changes on the left column and diagnostics (errors / warnings) on the right column, drawn as vertical bars whose height scales with the number of affected lines: a single changed line is a small mark, a large hunk fills the cell.
+- The currently visible range is shown as a grey band, and the primary cursor as a thin colored line that stays out of the way of the git markers.
+- Enabled by default — turn it off from your `config.toml`.
+- Themeable through `ui.minimap` (strip background), `ui.minimap.selection` (visible range) and `ui.minimap.cursor` (cursor line); git and diagnostic colors reuse the existing `diff.plus` / `diff.minus` / `diff.delta` and `error` / `warning` / `info` / `hint` scopes.
+
+```toml
+[editor.minimap]
+enable = false
+```
+
+```toml
+# in your theme
+"ui.minimap" = { bg = "revolver" }
+"ui.minimap.selection" = { bg = "comet" }
+"ui.minimap.cursor" = { fg = "delta" }
+```
+
 ### Polished UI
 
 - Floating, rounded search box for `/`.

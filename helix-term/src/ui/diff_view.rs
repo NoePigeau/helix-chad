@@ -72,9 +72,9 @@ pub fn highlight_lines(
             continue;
         }
 
-        let style = stack
-            .iter()
-            .fold(Style::default(), |acc, highlight| acc.patch(theme.highlight(*highlight)));
+        let style = stack.iter().fold(Style::default(), |acc, highlight| {
+            acc.patch(theme.highlight(*highlight))
+        });
 
         if style != Style::default() {
             push_span(&mut lines, slice, start, pos, style);
@@ -108,7 +108,13 @@ fn render_headers(area: Rect, surface: &mut Surface, styles: &DiffStyles) {
     surface.clear_with(Rect::new(area.x, area.y, area.width, 1), styles.header);
     surface.set_stringn(divider_x, area.y, DIVIDER, 1, styles.divider);
 
-    surface.set_stringn(area.x + GUTTER_GAP, area.y, "HEAD", area.width as usize, styles.header);
+    surface.set_stringn(
+        area.x + GUTTER_GAP,
+        area.y,
+        "HEAD",
+        area.width as usize,
+        styles.header,
+    );
     surface.set_stringn(
         divider_x + 1 + GUTTER_GAP,
         area.y,
@@ -140,7 +146,12 @@ fn render_panes(diff: &DiffView, area: Rect, surface: &mut Surface, styles: &Dif
         highlights: &diff.base_highlights,
     };
     let right = Column {
-        area: Rect::new(divider_x + 1, inner_y, area.width.saturating_sub(area.width / 2 + 1), height),
+        area: Rect::new(
+            divider_x + 1,
+            inner_y,
+            area.width.saturating_sub(area.width / 2 + 1),
+            height,
+        ),
         gutter,
         rope: &diff.doc,
         highlights: &diff.doc_highlights,
@@ -165,15 +176,30 @@ fn render_panes(diff: &DiffView, area: Rect, surface: &mut Surface, styles: &Dif
     }
 }
 
-fn render_cell(surface: &mut Surface, column: &Column, y: u16, line: Option<usize>, line_style: Style) {
-    surface.clear_with(Rect::new(column.area.x, y, column.area.width, 1), line_style);
+fn render_cell(
+    surface: &mut Surface,
+    column: &Column,
+    y: u16,
+    line: Option<usize>,
+    line_style: Style,
+) {
+    surface.clear_with(
+        Rect::new(column.area.x, y, column.area.width, 1),
+        line_style,
+    );
 
     let Some(line) = line else {
         return;
     };
 
     let number = format!("{:>width$}", line + 1, width = column.gutter as usize);
-    surface.set_stringn(column.area.x, y, &number, column.gutter as usize, line_style);
+    surface.set_stringn(
+        column.area.x,
+        y,
+        &number,
+        column.gutter as usize,
+        line_style,
+    );
 
     let mut writer = LineWriter {
         surface,
@@ -241,9 +267,9 @@ impl LineWriter<'_> {
             return;
         }
 
-        let (next_x, _) = self
-            .surface
-            .set_stringn(self.x, self.y, text, (self.end_x - self.x) as usize, style);
+        let (next_x, _) =
+            self.surface
+                .set_stringn(self.x, self.y, text, (self.end_x - self.x) as usize, style);
         self.x = next_x;
     }
 }
@@ -271,8 +297,20 @@ fn merge(base: Style, syntax: Style) -> Style {
 
 fn render_separator(left: Rect, right: Rect, y: u16, surface: &mut Surface, styles: &DiffStyles) {
     let dash = |width: u16| "\u{2504}".repeat(width as usize);
-    surface.set_stringn(left.x, y, &dash(left.width), left.width as usize, styles.separator);
-    surface.set_stringn(right.x, y, &dash(right.width), right.width as usize, styles.separator);
+    surface.set_stringn(
+        left.x,
+        y,
+        &dash(left.width),
+        left.width as usize,
+        styles.separator,
+    );
+    surface.set_stringn(
+        right.x,
+        y,
+        &dash(right.width),
+        right.width as usize,
+        styles.separator,
+    );
     surface.set_stringn(left.x + left.width, y, "\u{253c}", 1, styles.separator);
 }
 
@@ -304,8 +342,20 @@ impl DiffStyles {
             background,
             header: background.patch(context).add_modifier(Modifier::BOLD),
             context,
-            deleted: line_tint(theme, context, "ui.diff.deleted", "diff.minus", Color::Rgb(0xF0, 0xCF, 0xCF)),
-            added: line_tint(theme, context, "ui.diff.added", "diff.plus", Color::Rgb(0xCF, 0xEB, 0xD4)),
+            deleted: line_tint(
+                theme,
+                context,
+                "ui.diff.deleted",
+                "diff.minus",
+                Color::Rgb(0xF0, 0xCF, 0xCF),
+            ),
+            added: line_tint(
+                theme,
+                context,
+                "ui.diff.added",
+                "diff.plus",
+                Color::Rgb(0xCF, 0xEB, 0xD4),
+            ),
             filler: filler_style(theme, context),
             divider: Style::default().fg(divider_fg),
             separator: Style::default().fg(divider_fg),

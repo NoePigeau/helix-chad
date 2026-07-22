@@ -45,7 +45,11 @@ pub struct DiffView {
 impl DiffView {
     pub fn new(title: String, path: PathBuf, base: Rope, doc: Rope) -> Self {
         let hunks = diff_hunks(base.clone(), doc.clone());
-        let rows = collapse_context(build_rows(content_lines(&base), content_lines(&doc), &hunks));
+        let rows = collapse_context(build_rows(
+            content_lines(&base),
+            content_lines(&doc),
+            &hunks,
+        ));
 
         Self {
             title,

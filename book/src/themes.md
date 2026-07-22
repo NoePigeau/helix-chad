@@ -365,6 +365,9 @@ These scopes are used for theming the editor interface:
 | `ui.cursorline.secondary`         | The lines of any other cursors ([if cursorline is enabled][editor-section])                    |
 | `ui.cursorcolumn.primary`         | The column of the primary cursor ([if cursorcolumn is enabled][editor-section])                |
 | `ui.cursorcolumn.secondary`       | The columns of any other cursors ([if cursorcolumn is enabled][editor-section])                |
+| `ui.minimap`                      | Background of the minimap strip ([if minimap is enabled][editor-section])                       |
+| `ui.minimap.selection`            | The visible viewport band in the minimap                                                       |
+| `ui.minimap.cursor`               | The primary cursor line in the minimap                                                         |
 | `warning`                         | Diagnostics warning (gutter)                                                                   |
 | `warning.diagnostic.inline`       | The inline diagnostic for the warning severity                                                 |
 | `error`                           | Diagnostics error (gutter)                                                                     |

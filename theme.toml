@@ -75,6 +75,9 @@ tabstop = { modifiers = ["italic"], bg = "bossanova" }
 "ui.cursorline.primary" = { bg = "bossanova" }
 "ui.highlight" = { bg = "bossanova" }
 "ui.highlight.frameline" = { bg = "#634450" }
+"ui.minimap" = { bg = "revolver" }
+"ui.minimap.selection" = { bg = "comet" }
+"ui.minimap.cursor" = { fg = "delta" }
 "ui.debug" = { fg = "#634450" }
 "ui.debug.breakpoint" = { fg = "apricot" }
 "ui.menu" = { fg = "lavender", bg = "revolver" }

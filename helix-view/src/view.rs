@@ -24,6 +24,10 @@ use std::{
 
 const JUMP_LIST_CAPACITY: usize = 30;
 
+const MINIMAP_WIDTH: u16 = 3;
+
+const MINIMAP_MIN_TEXT_WIDTH: u16 = 8;
+
 type Jump = (DocumentId, Selection);
 
 #[derive(Debug, Clone)]
@@ -208,7 +212,10 @@ impl View {
     }
 
     pub fn inner_area(&self, doc: &Document) -> Rect {
-        self.area.clip_left(self.gutter_offset(doc)).clip_bottom(1) // -1 for statusline
+        self.area
+            .clip_left(self.gutter_offset(doc))
+            .clip_right(self.minimap_width(doc))
+            .clip_bottom(1) // -1 for statusline
     }
 
     pub fn inner_height(&self) -> usize {
@@ -216,7 +223,40 @@ impl View {
     }
 
     pub fn inner_width(&self, doc: &Document) -> u16 {
-        self.area.clip_left(self.gutter_offset(doc)).width
+        self.area
+            .clip_left(self.gutter_offset(doc))
+            .clip_right(self.minimap_width(doc))
+            .width
+    }
+
+    pub fn minimap_width(&self, doc: &Document) -> u16 {
+        let config = doc.config.load();
+
+        if !config.minimap.enable {
+            return 0;
+        }
+
+        let gutter = self.gutter_offset(doc);
+
+        if self.area.width > gutter + MINIMAP_WIDTH + MINIMAP_MIN_TEXT_WIDTH {
+            MINIMAP_WIDTH
+        } else {
+            0
+        }
+    }
+
+    pub fn minimap_area(&self, doc: &Document) -> Option<Rect> {
+        let width = self.minimap_width(doc);
+
+        if width == 0 {
+            return None;
+        }
+
+        Some(
+            self.area
+                .clip_left(self.area.width.saturating_sub(width))
+                .clip_bottom(1),
+        )
     }
 
     pub fn gutters(&self) -> &[GutterType] {

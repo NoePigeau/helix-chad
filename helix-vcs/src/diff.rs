@@ -35,9 +35,7 @@ pub fn diff_hunks(diff_base: Rope, doc: Rope) -> Vec<Hunk> {
     diff.postprocess_with(
         &input.before,
         &input.after,
-        IndentHeuristic::new(|token| {
-            IndentLevel::for_ascii_line(input.interner[token].bytes(), 4)
-        }),
+        IndentHeuristic::new(|token| IndentLevel::for_ascii_line(input.interner[token].bytes(), 4)),
     );
 
     diff.hunks().collect()

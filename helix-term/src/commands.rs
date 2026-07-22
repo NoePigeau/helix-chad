@@ -4436,7 +4436,11 @@ fn goto_prev_diag(cx: &mut Context) {
 }
 
 fn goto_diff_view_file(cx: &mut Context) {
-    let Some(path) = doc!(cx.editor).diff_view.as_ref().map(|diff| diff.path.clone()) else {
+    let Some(path) = doc!(cx.editor)
+        .diff_view
+        .as_ref()
+        .map(|diff| diff.path.clone())
+    else {
         return;
     };
 

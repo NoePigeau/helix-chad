@@ -171,7 +171,10 @@ impl ChangesSidebar {
             .working_tree_status(&self.root, trust_full)
             .unwrap_or_default();
 
-        let previous = self.rows.get(self.state.selected).map(|row| row.path.clone());
+        let previous = self
+            .rows
+            .get(self.state.selected)
+            .map(|row| row.path.clone());
 
         self.groups = self.build_groups(collect_changes(status.staged, status.unstaged));
 
@@ -199,7 +202,11 @@ impl ChangesSidebar {
             .collect()
     }
 
-    fn build_group(&self, status: GitStatus, changes: &HashMap<PathBuf, ChangeInfo>) -> Option<Group> {
+    fn build_group(
+        &self,
+        status: GitStatus,
+        changes: &HashMap<PathBuf, ChangeInfo>,
+    ) -> Option<Group> {
         let files: Vec<(PathBuf, StageState)> = changes
             .iter()
             .filter(|(_, info)| info.status == status)
@@ -635,7 +642,11 @@ fn render_empty(inner: Rect, surface: &mut Surface, theme: &Theme) {
 
 fn render_group_row(row: &Row, y: u16, inner: Rect, surface: &mut Surface, style: Style) {
     let indent = "  ".repeat(row.depth);
-    let marker = if row.expanded { "\u{25be} " } else { "\u{25b8} " };
+    let marker = if row.expanded {
+        "\u{25be} "
+    } else {
+        "\u{25b8} "
+    };
     let line = format!("{indent}{marker}{}", row.label);
 
     surface.set_stringn(inner.x, y, &line, inner.width as usize, style);
@@ -664,7 +675,13 @@ fn render_entry_row(
         label_end.saturating_sub(x) as usize,
         Style::default().fg(color),
     );
-    surface.set_stringn(x, y, &row.label, label_end.saturating_sub(x) as usize, style);
+    surface.set_stringn(
+        x,
+        y,
+        &row.label,
+        label_end.saturating_sub(x) as usize,
+        style,
+    );
 
     let cb_x = end.saturating_sub(CHECKBOX_WIDTH);
     surface.set_stringn(cb_x, y, row.stage.glyph(), CHECKBOX_WIDTH as usize, style);
