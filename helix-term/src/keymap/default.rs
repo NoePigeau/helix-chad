@@ -242,6 +242,7 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "B" => { "Blame"
                 "c" => copy_blame_commit_url,
                 "p" => copy_blame_pull_request_url,
+                "t" => toggle_inline_blame,
             },
             "a" => code_action,
             "'" => last_picker,

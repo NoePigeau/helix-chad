@@ -72,7 +72,7 @@ A VSCode / Zed style blame annotation at the end of the line under the cursor.
 - Shows who last changed the line, when, and the commit message: `Noé Pigeau, 2 weeks ago • feat: Update read me`.
 - Hidden on lines with uncommitted changes.
 - Computed in the background and refreshed when a document is opened or saved.
-- Disabled by default — enable it from your `config.toml`, or toggle it at runtime with `:toggle inline-blame.enable`.
+- Disabled by default — enable it from your `config.toml`, or toggle it at runtime with `Space B t` (`toggle_inline_blame`) or `:toggle inline-blame.enable`.
 - The format is configurable with the `{author}`, `{time-ago}`, `{message}` and `{commit}` placeholders.
 - Themeable through the `ui.virtual.inline-blame` key, falling back to a grey foreground (`#7A818A`).
 - `Space B c` copies the URL of the commit that last changed the current line, and `Space B p` the URL of the pull request that introduced it. Both work on GitHub, GitLab and Bitbucket remotes, follow the blame of the line under the cursor, and don't require the annotation to be enabled.
@@ -109,6 +109,7 @@ format = "{author}, {time-ago} • {message}"
 | `Ctrl-←`    | Narrow the focused sidebar                                                        | `narrow_sidebar`        |
 | `Space B c` | Copy the URL of the commit that last changed the current line                     | `copy_blame_commit_url` |
 | `Space B p` | Copy the URL of the pull request that introduced the commit of the current line  | `copy_blame_pull_request_url` |
+| `Space B t` | Toggle inline git blame annotations                                               | `toggle_inline_blame`   |
 
 These are regular defaults — rebind any of them from your `config.toml` using the command name:
 

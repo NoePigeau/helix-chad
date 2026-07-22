@@ -47,7 +47,7 @@ use helix_core::{
 };
 use helix_view::{
     document::{FormatterError, Mode, SCRATCH_BUFFER_NAME},
-    editor::{Action, Motion},
+    editor::{Action, ConfigEvent, Motion},
     expansion,
     info::Info,
     input::KeyEvent,
@@ -414,6 +414,7 @@ impl MappableCommand {
         narrow_sidebar, "Narrow the focused sidebar",
         copy_blame_commit_url, "Copy the URL of the commit that last changed the current line",
         copy_blame_pull_request_url, "Copy the URL of the pull request that introduced the commit of the current line",
+        toggle_inline_blame, "Toggle inline git blame annotations",
         code_action, "Perform code action",
         buffer_picker, "Open buffer picker",
         jumplist_picker, "Open jumplist picker",
@@ -3253,6 +3254,29 @@ fn narrow_sidebar(cx: &mut Context) {
 enum BlameUrl {
     Commit,
     PullRequest,
+}
+
+fn toggle_inline_blame(cx: &mut Context) {
+    let mut config = (*cx.editor.config()).clone();
+    config.inline_blame.enable = !config.inline_blame.enable;
+    let enabled = config.inline_blame.enable;
+
+    if cx
+        .editor
+        .config_events
+        .0
+        .send(ConfigEvent::Update(Box::new(config)))
+        .is_err()
+    {
+        cx.editor.set_error("Failed to toggle inline blame");
+        return;
+    }
+
+    cx.editor.set_status(if enabled {
+        "Inline blame enabled"
+    } else {
+        "Inline blame disabled"
+    });
 }
 
 fn copy_blame_commit_url(cx: &mut Context) {
