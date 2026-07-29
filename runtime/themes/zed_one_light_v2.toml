@@ -115,7 +115,7 @@
 "ui.virtual.inlay-hint"           = { fg = "hint" }
 "ui.virtual.jump-label"           = { fg = "red", modifiers = ["bold"] }
 
-"ui.highlight"                    = { bg = "selection" }
+"ui.highlight"                    = { bg = "hl_read" }
 "ui.cursor.match.search"          = { bg = "search_match" }
 
 # --- Diagnostics ----------------------------------------------------------
