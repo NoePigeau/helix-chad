@@ -1196,11 +1196,7 @@ impl EditorView {
                 style = style.patch(git.style(&editor.theme));
             }
 
-            let area_width = surface.area.width;
-            let rem_width = |x: u16| {
-                let used_width = viewport.x.saturating_sub(x);
-                area_width.saturating_sub(used_width) as usize
-            };
+            let rem_width = |x: u16| viewport.right().saturating_sub(x) as usize;
 
             let (glyph, icon_color) = crate::ui::icons::file_icon(doc.path().unwrap_or(&scratch));
             x = surface
@@ -1234,7 +1230,7 @@ impl EditorView {
                 .set_stringn(x, viewport.y, " ", rem_width(x), style)
                 .0;
 
-            if x >= surface.area.right() {
+            if x >= viewport.right() {
                 break;
             }
         }
@@ -2167,11 +2163,8 @@ impl Component for EditorView {
             _ => false,
         };
 
-        // -1 for commandline and -1 for bufferline
+        // -1 for commandline
         let mut editor_area = area.clip_bottom(1);
-        if use_bufferline {
-            editor_area = editor_area.clip_top(1);
-        }
 
         let explorer_area = if self.explorer.is_open() {
             let width = self.explorer.width().min(editor_area.width);
@@ -2191,12 +2184,20 @@ impl Component for EditorView {
             None
         };
 
+        let bufferline_area = if use_bufferline {
+            let top = editor_area.with_height(1);
+            editor_area = editor_area.clip_top(1);
+            Some(top)
+        } else {
+            None
+        };
+
         // if the terminal size suddenly changed, we need to trigger a resize
         cx.editor.resize(editor_area);
 
-        if use_bufferline {
+        if let Some(bufferline_area) = bufferline_area {
             self.refresh_bufferline_git(cx.editor);
-            self.render_bufferline(cx.editor, area.with_height(1), surface);
+            self.render_bufferline(cx.editor, bufferline_area, surface);
         }
 
         for (view, is_focused) in cx.editor.tree.views() {
