@@ -689,3 +689,21 @@ async fn test_indent_with_spaces() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn append_with_cursor_on_line_ending_stays_on_line() -> anyhow::Result<()> {
+    test((
+        indoc! {"\
+            ceci est une ligne.#[
+            |]#deuxieme ligne
+            "},
+        "a!",
+        indoc! {"\
+            ceci est une ligne.!#[
+            |]#deuxieme ligne
+            "},
+    ))
+    .await?;
+
+    Ok(())
+}
